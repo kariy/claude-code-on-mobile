@@ -5,6 +5,7 @@
       "name": "cc-sdk-test",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.39",
+        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@types/bun": "latest",

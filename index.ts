@@ -17,6 +17,7 @@ async function chat(prompt: string) {
 		prompt,
 		options: {
 			allowedTools: ["Read", "Glob", "Grep", "Bash"],
+			includePartialMessages: true,
 			...(sessionId && { resume: true, sessionId }),
 		},
 	})) {
@@ -24,11 +25,13 @@ async function chat(prompt: string) {
 			sessionId = message.sessionId;
 		}
 
-		if (message.type === "assistant" && message.message?.content) {
-			for (const block of message.message.content) {
-				if (block.type === "text") {
-					process.stdout.write(block.text);
-				}
+		if (message.type === "stream_event") {
+			const { event } = message;
+			if (
+				event.type === "content_block_delta" &&
+				event.delta.type === "text_delta"
+			) {
+				process.stdout.write(event.delta.text);
 			}
 		}
 
