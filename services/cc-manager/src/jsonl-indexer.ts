@@ -72,8 +72,7 @@ export class ClaudeJsonlIndexer {
 
 				try {
 					const parsed = this.parseSessionJsonl(jsonlPath);
-					const decodedCwd = decodeEncodedCwd(encodedCwd);
-					const cwd = decodedCwd;
+					const cwd = parsed.cwd ?? decodeEncodedCwd(encodedCwd);
 
 					this.repository.upsertSessionMetadata({
 						sessionId,
@@ -154,11 +153,13 @@ export class ClaudeJsonlIndexer {
 		messages: HistoryMessage[];
 		messageCount: number;
 		firstUserText: string;
+		cwd: string | null;
 	} {
 		const raw = readFileSync(filePath, "utf8");
 		const lines = raw.split("\n").filter(Boolean);
 		const messages: HistoryMessage[] = [];
 		let firstUserText = "";
+		let cwd: string | null = null;
 
 		for (const line of lines) {
 			let parsed: any;
@@ -170,6 +171,9 @@ export class ClaudeJsonlIndexer {
 
 			if (parsed.type === "user" && parsed.message) {
 				const text = extractTextBlocks(parsed.message.content).trim();
+				if (cwd === null && typeof parsed.cwd === "string") {
+					cwd = parsed.cwd;
+				}
 				if (text.length === 0) continue;
 				messages.push({ role: "user", text, uuid: parsed.uuid });
 				if (!firstUserText) firstUserText = text;
@@ -187,6 +191,7 @@ export class ClaudeJsonlIndexer {
 			messages,
 			messageCount: messages.length,
 			firstUserText,
+			cwd,
 		};
 	}
 }
