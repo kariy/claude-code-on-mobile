@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Claude Manager</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #141414;
+    color: #fff;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  #header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #1f1f1f;
+    flex-shrink: 0;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  #back-btn {
+    display: none;
+    background: #333;
+    border: none;
+    color: #fff;
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  #back-btn:hover { background: #444; }
+  #header-info { flex: 1; min-width: 0; }
+  #header-title { font-size: 16px; font-weight: 600; }
+  #header-status { font-size: 12px; color: #888; }
+  #header-status.connected { color: #4ade80; }
+  #header-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+  .header-btn {
+    background: #3a86ff;
+    border: none;
+    color: #fff;
+    padding: 6px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .header-btn:hover { background: #2a76ef; }
+  .header-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .header-btn.secondary { background: #333; }
+  .header-btn.secondary:hover { background: #444; }
+
+  /* Views */
+  .view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+  .view.active { display: flex; }
+
+  /* Connection view */
+  #connection-view { justify-content: center; align-items: center; padding: 20px; gap: 16px; }
+  #connection-view .status-text { font-size: 14px; color: #888; text-align: center; }
+  #nonce-group { display: none; flex-direction: column; gap: 8px; width: 100%; max-width: 360px; }
+  #nonce-group label { font-size: 13px; color: #aaa; }
+  #nonce-input {
+    background: #222;
+    border: 1px solid #333;
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    outline: none;
+  }
+  #nonce-input:focus { border-color: #3a86ff; }
+  #nonce-submit {
+    background: #3a86ff;
+    border: none;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  /* Sessions view */
+  #sessions-view { padding: 0; }
+  #sessions-header {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  #sessions-header h2 { flex: 1; font-size: 20px; font-weight: 600; }
+  .icon-btn {
+    background: #333;
+    border: none;
+    color: #fff;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .icon-btn:hover { background: #444; }
+  #sessions-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 16px 100px;
+  }
+  #sessions-list::-webkit-scrollbar { width: 6px; }
+  #sessions-list::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  .session-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: #888;
+  }
+  .session-empty h3 { color: #aaa; margin-bottom: 6px; font-size: 16px; }
+  .session-empty p { font-size: 13px; }
+  .session-card {
+    background: #222;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .session-card:hover { background: #2a2a2a; }
+  .session-card-body { flex: 1; min-width: 0; }
+  .session-title {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .session-cwd {
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .session-meta {
+    font-size: 11px;
+    color: #666;
+    margin-top: 3px;
+  }
+  .session-chevron { color: #555; font-size: 12px; flex-shrink: 0; }
+  #new-session-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: #3a86ff;
+    border: none;
+    color: #fff;
+    font-size: 28px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+  #new-session-fab:hover { background: #2a76ef; }
+
+  /* Chat view */
+  #chat-view { position: relative; }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #messages::-webkit-scrollbar { width: 6px; }
+  #messages::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  .bubble-row { display: flex; }
+  .bubble-row.user { justify-content: flex-end; }
+  .bubble-row.assistant { justify-content: flex-start; }
+  .bubble {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .bubble-row.user .bubble {
+    background: #3a86ff;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble-row.assistant .bubble {
+    background: #333;
+    border-bottom-left-radius: 4px;
+  }
+
+  /* Typing indicator */
+  .typing-indicator { display: flex; align-items: center; gap: 4px; padding: 4px 0; }
+  .typing-indicator .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.6);
+    animation: bounce 1.2s infinite ease-in-out;
+  }
+  .typing-indicator .dot:nth-child(2) { animation-delay: 0.15s; }
+  .typing-indicator .dot:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
+
+  /* Input bar */
+  #input-bar {
+    display: none;
+    padding: 10px 12px;
+    background: #1f1f1f;
+    border-top: 1px solid #2a2a2a;
+    gap: 10px;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  #input-bar.active { display: flex; }
+  #msg-input {
+    flex: 1;
+    background: #2a2a2a;
+    border: none;
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    max-height: 120px;
+    line-height: 1.4;
+  }
+  #msg-input::placeholder { color: #666; }
+  #send-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: #3a86ff;
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #send-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+  .loading-spinner {
+    display: inline-block;
+    width: 18px; height: 18px;
+    border: 2px solid #555;
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <button id="back-btn" onclick="returnToSessions()">&#8249;</button>
+  <div id="header-info">
+    <div id="header-title">Claude Manager</div>
+    <div id="header-status">Connecting...</div>
+  </div>
+  <div id="header-actions">
+    <button id="disconnect-btn" class="header-btn secondary" style="display:none" onclick="doDisconnect()">Disconnect</button>
+  </div>
+</div>
+
+<!-- Connection view -->
+<div id="connection-view" class="view active">
+  <div class="status-text" id="conn-status-text">Connecting...</div>
+  <div id="nonce-group">
+    <label for="nonce-input">Bootstrap Nonce</label>
+    <input id="nonce-input" type="text" placeholder="Enter nonce...">
+    <button id="nonce-submit" onclick="retryWithNonce()">Connect</button>
+  </div>
+</div>
+
+<!-- Sessions view -->
+<div id="sessions-view" class="view">
+  <div id="sessions-header">
+    <h2>Sessions</h2>
+    <button class="icon-btn" onclick="refreshSessions(true)" title="Refresh">&#8635;</button>
+  </div>
+  <div id="sessions-list"></div>
+  <button id="new-session-fab" onclick="startNewSession()">+</button>
+</div>
+
+<!-- Chat view -->
+<div id="chat-view" class="view">
+  <div id="messages"></div>
+</div>
+
+<div id="input-bar">
+  <textarea id="msg-input" rows="1" placeholder="Message..."></textarea>
+  <button id="send-btn" disabled onclick="sendMessage()">&#8593;</button>
+</div>
+
+<script>
+// ---- State ----
+let accessToken = localStorage.getItem("cc-access-token") || null;
+let deviceId = localStorage.getItem("cc-device-id") || null;
+let currentView = "connecting"; // "connecting" | "sessions" | "chat"
+let activeSessionId = null;
+let activeEncodedCwd = null;
+let activeRequestIds = new Set();
+let ws = null;
+let sessions = [];
+let messages = []; // {role, text, requestId}
+let refreshInterval = null;
+
+const $ = (id) => document.getElementById(id);
+
+// ---- Boot ----
+init();
+
+async function init() {
+  setView("connecting");
+  setStatus("Connecting...");
+  $("conn-status-text").textContent = "Registering device...";
+
+  try {
+    await ensureAccessToken();
+    $("conn-status-text").textContent = "Opening WebSocket...";
+    openWebSocket();
+  } catch (e) {
+    $("conn-status-text").textContent = "Connection failed: " + e.message;
+    if (e.nonceRequired) {
+      $("nonce-group").style.display = "flex";
+    }
+  }
+}
+
+async function ensureAccessToken(nonce) {
+  if (accessToken) return;
+
+  const body = { device_name: "web-client" };
+  if (nonce) body.bootstrap_nonce = nonce;
+
+  const res = await fetch("/v1/bootstrap/register-device", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 403) {
+    const err = new Error("Bootstrap nonce required");
+    err.nonceRequired = true;
+    throw err;
+  }
+
+  if (!res.ok) {
+    throw new Error("Bootstrap failed: " + res.status);
+  }
+
+  const data = await res.json();
+  accessToken = data.access_token;
+  deviceId = data.device_id;
+  localStorage.setItem("cc-access-token", accessToken);
+  localStorage.setItem("cc-device-id", deviceId);
+}
+
+async function retryWithNonce() {
+  const nonce = $("nonce-input").value.trim();
+  if (!nonce) return;
+  $("conn-status-text").textContent = "Registering with nonce...";
+  $("nonce-group").style.display = "none";
+  accessToken = null;
+  localStorage.removeItem("cc-access-token");
+  try {
+    await ensureAccessToken(nonce);
+    openWebSocket();
+  } catch (e) {
+    $("conn-status-text").textContent = "Connection failed: " + e.message;
+    if (e.nonceRequired) $("nonce-group").style.display = "flex";
+  }
+}
+
+// ---- WebSocket ----
+function openWebSocket() {
+  if (ws) { ws.close(); ws = null; }
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/v1/ws`);
+
+  ws.onopen = () => {
+    setStatus("Authenticating...");
+    ws.send(JSON.stringify({ type: "auth.init", token: accessToken }));
+  };
+
+  ws.onmessage = (evt) => {
+    let msg;
+    try { msg = JSON.parse(evt.data); } catch { return; }
+    handleServerMessage(msg);
+  };
+
+  ws.onclose = () => {
+    setStatus("Disconnected");
+    $("disconnect-btn").style.display = "none";
+    activeRequestIds.clear();
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+    // Auto-reconnect after 2s
+    setTimeout(() => {
+      if (currentView !== "connecting") {
+        setView("connecting");
+        $("conn-status-text").textContent = "Reconnecting...";
+      }
+      init();
+    }, 2000);
+  };
+
+  ws.onerror = () => {
+    // onclose will fire after this
+  };
+}
+
+function handleServerMessage(msg) {
+  switch (msg.type) {
+    case "hello":
+      break;
+
+    case "auth.ok":
+      setStatus("Connected", true);
+      $("disconnect-btn").style.display = "";
+      activeSessionId = null;
+      activeEncodedCwd = null;
+      messages = [];
+      setView("sessions");
+      refreshSessions(true);
+      startRefreshTimer();
+      break;
+
+    case "session.created":
+      activeSessionId = msg.session_id;
+      activeEncodedCwd = msg.encoded_cwd;
+      break;
+
+    case "session.state":
+      if (msg.session_id) activeSessionId = msg.session_id;
+      if (msg.encoded_cwd) activeEncodedCwd = msg.encoded_cwd;
+      if (msg.status === "index_refreshed" && currentView === "sessions") {
+        refreshSessions(false);
+      }
+      break;
+
+    case "stream.delta":
+      if (msg.text) {
+        const reqId = msg.request_id;
+        const existing = reqId ? messages.find(m => m.requestId === reqId) : null;
+        if (existing) {
+          existing.text += msg.text;
+        } else {
+          messages.push({ role: "assistant", text: msg.text, requestId: reqId });
+        }
+        renderMessages();
+      }
+      break;
+
+    case "stream.done":
+      if (msg.request_id) {
+        activeRequestIds.delete(msg.request_id);
+        const m = messages.find(m => m.requestId === msg.request_id);
+        if (m) m.requestId = null;
+      } else {
+        activeRequestIds.clear();
+      }
+      renderMessages();
+      updateSendBtn();
+      break;
+
+    case "error": {
+      const errText = "Error: " + (msg.message || "Unknown error");
+      if (msg.request_id) {
+        activeRequestIds.delete(msg.request_id);
+        const m = messages.find(m => m.requestId === msg.request_id);
+        if (m) {
+          m.text = m.text ? m.text + "\n" + errText : errText;
+          m.requestId = null;
+        } else {
+          messages.push({ role: "assistant", text: errText });
+        }
+      } else {
+        messages.push({ role: "assistant", text: errText });
+        activeRequestIds.clear();
+      }
+      if (msg.code === "unauthorized") {
+        accessToken = null;
+        localStorage.removeItem("cc-access-token");
+      }
+      renderMessages();
+      updateSendBtn();
+      break;
+    }
+
+    case "pong":
+      break;
+  }
+}
+
+function startRefreshTimer() {
+  clearInterval(refreshInterval);
+  refreshInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN && activeRequestIds.size === 0) {
+      ws.send(JSON.stringify({ type: "session.refresh_index" }));
+    }
+  }, 10000);
+}
+
+// ---- Views ----
+function setView(view) {
+  currentView = view;
+  $("connection-view").classList.toggle("active", view === "connecting");
+  $("sessions-view").classList.toggle("active", view === "sessions");
+  $("chat-view").classList.toggle("active", view === "chat");
+  $("input-bar").classList.toggle("active", view === "chat");
+  $("back-btn").style.display = view === "chat" ? "" : "none";
+  $("new-session-fab").style.display = view === "sessions" ? "flex" : "none";
+
+  if (view === "chat") {
+    $("msg-input").focus();
+    scrollToBottom();
+  }
+}
+
+function setStatus(text, connected) {
+  const el = $("header-status");
+  el.textContent = text;
+  el.classList.toggle("connected", !!connected);
+}
+
+// ---- Sessions ----
+async function refreshSessions(forceRefresh) {
+  if (!accessToken) return;
+  const qs = forceRefresh ? "?refresh=1" : "";
+  try {
+    const res = await fetch("/v1/sessions" + qs, {
+      headers: { Authorization: "Bearer " + accessToken },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    sessions = data.sessions || [];
+    renderSessions();
+  } catch {}
+}
+
+function renderSessions() {
+  const list = $("sessions-list");
+  if (sessions.length === 0) {
+    list.innerHTML = '<div class="session-empty"><h3>No sessions yet</h3><p>Tap + to create a new Claude Code session.</p></div>';
+    return;
+  }
+  list.innerHTML = sessions.map((s, i) => `
+    <div class="session-card" onclick="openSession(${i})">
+      <div class="session-card-body">
+        <div class="session-title">${esc(s.title || "Untitled session")}</div>
+        <div class="session-cwd">${esc(s.cwd || "")}</div>
+        <div class="session-meta">${relativeTime(s.last_activity_at || s.updated_at)} &middot; ${s.message_count || 0} messages</div>
+      </div>
+      <div class="session-chevron">&#8250;</div>
+    </div>
+  `).join("");
+}
+
+function openSession(index) {
+  const s = sessions[index];
+  if (!s) return;
+  activeSessionId = s.session_id;
+  activeEncodedCwd = s.encoded_cwd;
+  messages = [];
+  activeRequestIds.clear();
+  setView("chat");
+  renderMessages();
+  loadHistory(s.session_id, s.encoded_cwd);
+}
+
+async function loadHistory(sessionId, encodedCwd) {
+  if (!accessToken) return;
+  const qs = encodedCwd ? "?encoded_cwd=" + encodeURIComponent(encodedCwd) : "";
+  try {
+    const res = await fetch("/v1/sessions/" + encodeURIComponent(sessionId) + "/history" + qs, {
+      headers: { Authorization: "Bearer " + accessToken },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    // Only apply if we're still viewing this session and no streaming happened
+    if (activeSessionId === sessionId && activeEncodedCwd === encodedCwd && activeRequestIds.size === 0) {
+      messages = (data.messages || []).map(m => ({ role: m.role, text: m.text }));
+      renderMessages();
+    }
+  } catch {}
+}
+
+function startNewSession() {
+  activeSessionId = null;
+  activeEncodedCwd = null;
+  messages = [];
+  activeRequestIds.clear();
+  setView("chat");
+  renderMessages();
+  $("msg-input").focus();
+}
+
+function returnToSessions() {
+  activeRequestIds.clear();
+  setView("sessions");
+  refreshSessions(false);
+}
+
+// ---- Chat ----
+function sendMessage() {
+  const input = $("msg-input");
+  const text = input.value.trim();
+  if (!text) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const requestId = crypto.randomUUID();
+  const payload = { request_id: requestId, prompt: text };
+
+  if (activeSessionId && activeEncodedCwd) {
+    payload.type = "session.send";
+    payload.session_id = activeSessionId;
+    payload.encoded_cwd = activeEncodedCwd;
+  } else {
+    payload.type = "session.create";
+  }
+
+  messages.push({ role: "user", text });
+  messages.push({ role: "assistant", text: "", requestId });
+  activeRequestIds.add(requestId);
+  input.value = "";
+  input.style.height = "auto";
+  renderMessages();
+  updateSendBtn();
+
+  ws.send(JSON.stringify(payload));
+}
+
+function renderMessages() {
+  const container = $("messages");
+  container.innerHTML = messages.map(m => {
+    const isActive = m.requestId && activeRequestIds.has(m.requestId);
+    const showTyping = m.role === "assistant" && m.text === "" && isActive;
+    const content = showTyping
+      ? '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>'
+      : esc(m.text);
+    return `<div class="bubble-row ${m.role}"><div class="bubble">${content}</div></div>`;
+  }).join("");
+  scrollToBottom();
+}
+
+function scrollToBottom() {
+  const container = $("messages");
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
+}
+
+function updateSendBtn() {
+  $("send-btn").disabled = !$("msg-input").value.trim();
+}
+
+// ---- Input handling ----
+const msgInput = $("msg-input");
+msgInput.addEventListener("input", () => {
+  updateSendBtn();
+  // Auto-resize
+  msgInput.style.height = "auto";
+  msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + "px";
+});
+msgInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+function doDisconnect() {
+  clearInterval(refreshInterval);
+  refreshInterval = null;
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  activeRequestIds.clear();
+  setStatus("Disconnected");
+  $("disconnect-btn").style.display = "none";
+  setView("connecting");
+  $("conn-status-text").textContent = "Disconnected. Reload to reconnect.";
+}
+
+// ---- Helpers ----
+function esc(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function relativeTime(ms) {
+  if (!ms) return "No activity";
+  const diff = Date.now() - ms;
+  if (diff < 60000) return "just now";
+  if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
+  if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
+  return Math.floor(diff / 86400000) + "d ago";
+}
+</script>
+</body>
+</html>

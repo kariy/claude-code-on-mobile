@@ -3,7 +3,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 export interface StreamPromptArgs {
 	requestId: string;
 	prompt: string;
-	cwd: string;
+	cwd?: string;
 	resumeSessionId?: string;
 	allowedTools: string[];
 	onSessionId: (sessionId: string) => void;
@@ -16,12 +16,13 @@ export class ClaudeService {
 	private readonly running = new Map<string, ReturnType<typeof query>>();
 
 	async streamPrompt(args: StreamPromptArgs): Promise<void> {
+		console.log(args);
 		const q = query({
 			prompt: args.prompt,
 			options: {
-				allowedTools: args.allowedTools,
+				allowedTools: ["Read", "Glob", "Grep", "Bash"],
 				includePartialMessages: true,
-				cwd: args.cwd,
+				// ...(args.cwd && { cwd: args.cwd }),
 				...(args.resumeSessionId && { resume: args.resumeSessionId }),
 			},
 		});
@@ -45,12 +46,12 @@ export class ClaudeService {
 					}
 				}
 
-				if (message.type === "result") {
-					if (!didEmitDone) {
-						didEmitDone = true;
-						args.onDone();
-					}
-				}
+				// if (message.type === "result") {
+				// 	if (!didEmitDone) {
+				// 		didEmitDone = true;
+				// 		args.onDone();
+				// 	}
+				// }
 			}
 
 			if (!didEmitDone) {

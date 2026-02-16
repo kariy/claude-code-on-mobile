@@ -566,6 +566,9 @@ final class ChatViewModel {
         case "stream.done":
             if let reqId = json["request_id"] as? String {
                 activeRequestIds.remove(reqId)
+                if let idx = messages.lastIndex(where: { $0.requestId == reqId }) {
+                    messages[idx].requestId = nil
+                }
             } else {
                 activeRequestIds.removeAll()
             }
@@ -579,6 +582,9 @@ final class ChatViewModel {
             }
             if let reqId = json["request_id"] as? String {
                 activeRequestIds.remove(reqId)
+                if let idx = messages.lastIndex(where: { $0.requestId == reqId }) {
+                    messages[idx].requestId = nil
+                }
             } else {
                 activeRequestIds.removeAll()
             }

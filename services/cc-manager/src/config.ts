@@ -9,6 +9,7 @@ export interface ManagerConfig {
 	bootstrapNonce?: string;
 	allowedTools: string[];
 	maxHistoryMessages: number;
+	defaultCwd: string;
 }
 
 function parseIntegerEnv(name: string, fallback: number): number {
@@ -54,5 +55,6 @@ export function loadConfig(): ManagerConfig {
 		bootstrapNonce: process.env.CC_MANAGER_BOOTSTRAP_NONCE,
 		allowedTools: parseAllowedTools(),
 		maxHistoryMessages: parseIntegerEnv("CC_MANAGER_MAX_HISTORY_MESSAGES", 5000),
+		defaultCwd: resolvePath(process.env.CC_MANAGER_DEFAULT_CWD ?? "/"),
 	};
 }

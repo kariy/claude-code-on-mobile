@@ -6,6 +6,7 @@
   "scripts": {
     "dev:manager": "bun run services/cc-manager/src/main.ts",
     "dev:manager:public": "bash scripts/start-server.sh",
+    "dev:web": "open http://localhost:${CC_MANAGER_PORT:-8787} && bun run services/cc-manager/src/main.ts",
     "dev:cli": "bun run index.ts",
     "dev:legacy-server": "bun run server.ts",
     "test:manager": "bun test services/cc-manager/src",

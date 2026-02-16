@@ -48,3 +48,120 @@ export interface JsonlIndexUpdate {
 	fileSize: number;
 	fileMtimeMs: number;
 }
+
+// ── WebSocket server→client messages ────────────────────────────
+
+export interface WsHelloMessage {
+	type: "hello";
+	requires_auth: boolean;
+	server_time: number;
+}
+
+export interface WsAuthOkMessage {
+	type: "auth.ok";
+	device_id: string;
+	device_name: string;
+}
+
+export interface WsSessionCreatedMessage {
+	type: "session.created";
+	request_id: string;
+	session_id: string;
+	encoded_cwd: string;
+	cwd: string;
+}
+
+export interface WsSessionStateMessage {
+	type: "session.state";
+	request_id?: string;
+	session_id?: string;
+	encoded_cwd?: string;
+	status: string;
+	stats?: unknown;
+}
+
+export interface WsStreamDeltaMessage {
+	type: "stream.delta";
+	request_id: string;
+	session_id?: string;
+	text: string;
+}
+
+export interface WsStreamDoneMessage {
+	type: "stream.done";
+	request_id: string;
+	session_id?: string;
+	encoded_cwd: string;
+}
+
+export interface WsErrorMessage {
+	type: "error";
+	code: string;
+	message: string;
+	request_id?: string;
+	details?: unknown;
+}
+
+export interface WsPongMessage {
+	type: "pong";
+	server_time: number;
+}
+
+export type WsServerMessage =
+	| WsHelloMessage
+	| WsAuthOkMessage
+	| WsSessionCreatedMessage
+	| WsSessionStateMessage
+	| WsStreamDeltaMessage
+	| WsStreamDoneMessage
+	| WsErrorMessage
+	| WsPongMessage;
+
+// ── HTTP response bodies ────────────────────────────────────────
+
+export interface RegisterDeviceResponse {
+	device_id: string;
+	access_token: string;
+	refresh_token: string;
+	issued_at: number;
+}
+
+export interface SessionListItem {
+	session_id: string;
+	encoded_cwd: string;
+	cwd: string;
+	title: string;
+	created_at: number;
+	updated_at: number;
+	last_activity_at: number;
+	source: string;
+	message_count: number;
+}
+
+export interface SessionListResponse {
+	sessions: SessionListItem[];
+}
+
+export interface SessionHistoryResponse {
+	session_id: string;
+	encoded_cwd: string;
+	messages: HistoryMessage[];
+	next_cursor: number | null;
+	total_messages: number;
+}
+
+export interface HealthResponse {
+	status: string;
+	time: string;
+}
+
+// ── Internal param types ────────────────────────────────────────
+
+export interface HandlePromptParams {
+	requestId: string;
+	prompt: string;
+	cwd: string;
+	encodedCwd: string;
+	resumeSessionId?: string;
+	titleHint?: string;
+}

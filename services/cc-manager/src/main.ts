@@ -2,15 +2,23 @@ import { ClaudeService } from "./claude-service";
 import { loadConfig } from "./config";
 import { ClaudeJsonlIndexer } from "./jsonl-indexer";
 import { AuthService } from "./auth";
-import { badRequest, jsonResponse, notFound, safeJson, unauthorized } from "./http-utils";
-import { ManagerRepository } from "./repository";
 import {
-	RegisterDeviceBodySchema,
-	WsClientMessageSchema,
-} from "./schemas";
-import type { DeviceRecord } from "./types";
+	badRequest,
+	jsonResponse,
+	notFound,
+	safeJson,
+	unauthorized,
+} from "./http-utils";
+import { ManagerRepository } from "./repository";
+import { RegisterDeviceBodySchema, WsClientMessageSchema } from "./schemas";
+import type {
+	DeviceRecord,
+	HandlePromptParams,
+	WsErrorMessage,
+	WsServerMessage,
+} from "./types";
 import { log } from "./logger";
-import { encodeCwd, nowMs, truncate } from "./utils";
+import { decodeEncodedCwd, encodeCwd, nowMs, truncate } from "./utils";
 
 const config = loadConfig();
 const repository = new ManagerRepository(config.dbPath);
@@ -48,16 +56,16 @@ function wsError(
 	requestId?: string,
 	details?: unknown,
 ): void {
-	wsSend(ws, {
-		type: "error",
-		code,
-		message,
-		...(requestId ? { request_id: requestId } : {}),
-		...(details !== undefined ? { details } : {}),
-	});
+	const msg: WsErrorMessage = { type: "error", code, message };
+	if (requestId) msg.request_id = requestId;
+	if (details !== undefined) msg.details = details;
+	wsSend(ws, msg);
 }
 
-function wsSend(ws: Bun.ServerWebSocket<WsConnectionState>, payload: unknown): void {
+function wsSend(
+	ws: Bun.ServerWebSocket<WsConnectionState>,
+	payload: WsServerMessage,
+): void {
 	const serialized =
 		typeof payload === "string" ? payload : JSON.stringify(payload);
 	log.wsSend(
@@ -93,14 +101,7 @@ function getSessionRouteMatch(pathname: string): {
 
 async function handlePromptMessage(
 	ws: Bun.ServerWebSocket<WsConnectionState>,
-	params: {
-		requestId: string;
-		prompt: string;
-		cwd: string;
-		encodedCwd: string;
-		resumeSessionId?: string;
-		titleHint?: string;
-	},
+	params: HandlePromptParams,
 ): Promise<void> {
 	const device = ws.data.device;
 	if (!device) {
@@ -125,14 +126,19 @@ async function handlePromptMessage(
 				sessionId,
 				encodedCwd: params.encodedCwd,
 				cwd: params.cwd,
-				title: truncate(params.titleHint ?? params.prompt.replace(/\s+/g, " "), 120),
+				title: truncate(
+					params.titleHint ?? params.prompt.replace(/\s+/g, " "),
+					120,
+				),
 				source: "db",
 			});
 
 			repository.recordEvent({
 				sessionId,
 				encodedCwd: params.encodedCwd,
-				eventType: params.resumeSessionId ? "session_resumed" : "session_created",
+				eventType: params.resumeSessionId
+					? "session_resumed"
+					: "session_created",
 				payload: {
 					device_id: device.deviceId,
 					cwd: params.cwd,
@@ -173,12 +179,17 @@ async function handlePromptMessage(
 			});
 		},
 		onDone: () => {
+			log.session(`On done. sessionId=${resolvedSessionId}`);
+
 			if (resolvedSessionId) {
 				repository.upsertSessionMetadata({
 					sessionId: resolvedSessionId,
 					encodedCwd: params.encodedCwd,
 					cwd: params.cwd,
-					title: truncate(params.titleHint ?? params.prompt.replace(/\s+/g, " "), 120),
+					title: truncate(
+						params.titleHint ?? params.prompt.replace(/\s+/g, " "),
+						120,
+					),
 					lastActivityAt: nowMs(),
 					source: "db",
 				});
@@ -201,6 +212,8 @@ async function handlePromptMessage(
 			});
 		},
 		onError: (error) => {
+			log.session(`On error. sessionId=${resolvedSessionId}`);
+
 			if (resolvedSessionId) {
 				repository.recordEvent({
 					sessionId: resolvedSessionId,
@@ -213,12 +226,7 @@ async function handlePromptMessage(
 					},
 				});
 			}
-			wsError(
-				ws,
-				String(error),
-				"prompt_failed",
-				params.requestId,
-			);
+			wsError(ws, String(error), "prompt_failed", params.requestId);
 		},
 	});
 
@@ -264,11 +272,17 @@ const server = Bun.serve<WsConnectionState>({
 			});
 		}
 
-		if (pathname === "/v1/bootstrap/register-device" && req.method === "POST") {
+		if (
+			pathname === "/v1/bootstrap/register-device" &&
+			req.method === "POST"
+		) {
 			const body = await safeJson(req);
 			const parsed = RegisterDeviceBodySchema.safeParse(body ?? {});
 			if (!parsed.success) {
-				return badRequest("Invalid register-device payload", parsed.error.format());
+				return badRequest(
+					"Invalid register-device payload",
+					parsed.error.format(),
+				);
 			}
 
 			if (
@@ -284,7 +298,8 @@ const server = Bun.serve<WsConnectionState>({
 			}
 
 			const registration = repository.registerDevice(
-				parsed.data.device_name ?? `ios-${crypto.randomUUID().slice(0, 8)}`,
+				parsed.data.device_name ??
+					`ios-${crypto.randomUUID().slice(0, 8)}`,
 			);
 			return jsonResponse(201, {
 				device_id: registration.deviceId,
@@ -294,68 +309,79 @@ const server = Bun.serve<WsConnectionState>({
 			});
 		}
 
-			if (pathname === "/v1/sessions" && req.method === "GET") {
-				const auth = authenticateForRoute(req);
-				if (auth instanceof Response) return auth;
+		if (pathname === "/v1/sessions" && req.method === "GET") {
+			const auth = authenticateForRoute(req);
+			if (auth instanceof Response) return auth;
 
-				if (url.searchParams.get("refresh") === "1") {
-					indexer.refreshIndex();
+			if (url.searchParams.get("refresh") === "1") {
+				indexer.refreshIndex();
+			}
+			const sessions = repository.listSessions();
+			return jsonResponse(200, {
+				sessions: sessions.map((session) => ({
+					session_id: session.sessionId,
+					encoded_cwd: session.encodedCwd,
+					cwd: session.cwd,
+					title: session.title,
+					created_at: session.createdAt,
+					updated_at: session.updatedAt,
+					last_activity_at: session.lastActivityAt,
+					source: session.source,
+					message_count: session.messageCount,
+				})),
+			});
+		}
+
+		const sessionRoute = getSessionRouteMatch(pathname);
+		if (sessionRoute) {
+			const auth = authenticateForRoute(req);
+			if (auth instanceof Response) return auth;
+
+			if (sessionRoute.action === "history" && req.method === "GET") {
+				const encodedCwdParam = url.searchParams.get("encoded_cwd");
+				const sessionCandidates = repository.findSessionCandidates(
+					sessionRoute.sessionId,
+				);
+				const chosen = encodedCwdParam
+					? sessionCandidates.find(
+							(candidate) =>
+								candidate.encodedCwd === encodedCwdParam,
+						)
+					: sessionCandidates[0];
+				if (!chosen) {
+					return jsonResponse(404, {
+						error: {
+							code: "session_not_found",
+							message: "Session not found",
+						},
+					});
 				}
-				const sessions = repository.listSessions();
+
+				const cursorRaw = url.searchParams.get("cursor");
+				const cursor = cursorRaw
+					? Number.parseInt(cursorRaw, 10)
+					: undefined;
+				const history = indexer.readHistory({
+					sessionId: sessionRoute.sessionId,
+					encodedCwd: chosen.encodedCwd,
+					cursor: Number.isNaN(cursor as number) ? undefined : cursor,
+				});
+
 				return jsonResponse(200, {
-					sessions: sessions.map((session) => ({
-						session_id: session.sessionId,
-						encoded_cwd: session.encodedCwd,
-						cwd: session.cwd,
-						title: session.title,
-						created_at: session.createdAt,
-						updated_at: session.updatedAt,
-						last_activity_at: session.lastActivityAt,
-						source: session.source,
-						message_count: session.messageCount,
-					})),
+					session_id: sessionRoute.sessionId,
+					encoded_cwd: chosen.encodedCwd,
+					messages: history.messages,
+					next_cursor: history.nextCursor,
+					total_messages: history.totalMessages,
 				});
 			}
+		}
 
-			const sessionRoute = getSessionRouteMatch(pathname);
-			if (sessionRoute) {
-				const auth = authenticateForRoute(req);
-				if (auth instanceof Response) return auth;
-
-				if (sessionRoute.action === "history" && req.method === "GET") {
-					const encodedCwdParam = url.searchParams.get("encoded_cwd");
-					const sessionCandidates = repository.findSessionCandidates(
-						sessionRoute.sessionId,
-					);
-					const chosen = encodedCwdParam
-						? sessionCandidates.find((candidate) => candidate.encodedCwd === encodedCwdParam)
-						: sessionCandidates[0];
-					if (!chosen) {
-						return jsonResponse(404, {
-							error: {
-								code: "session_not_found",
-								message: "Session not found",
-							},
-						});
-					}
-
-					const cursorRaw = url.searchParams.get("cursor");
-					const cursor = cursorRaw ? Number.parseInt(cursorRaw, 10) : undefined;
-					const history = indexer.readHistory({
-						sessionId: sessionRoute.sessionId,
-						encodedCwd: chosen.encodedCwd,
-						cursor: Number.isNaN(cursor as number) ? undefined : cursor,
-					});
-
-					return jsonResponse(200, {
-						session_id: sessionRoute.sessionId,
-						encoded_cwd: chosen.encodedCwd,
-						messages: history.messages,
-						next_cursor: history.nextCursor,
-						total_messages: history.totalMessages,
-					});
-				}
-			}
+		if (pathname === "/") {
+			return new Response(
+				Bun.file(new URL("../public/index.html", import.meta.url)),
+			);
+		}
 
 		return notFound();
 	},
@@ -369,10 +395,15 @@ const server = Bun.serve<WsConnectionState>({
 			});
 		},
 		async message(ws, rawMessage) {
-			const text = typeof rawMessage === "string" ? rawMessage : rawMessage.toString();
+			const text =
+				typeof rawMessage === "string"
+					? rawMessage
+					: rawMessage.toString();
+
 			log.wsRecv(
 				`connection_id=${ws.data.connectionId} payload=${formatWsLogPayload(text)}`,
 			);
+
 			const payload = parseJsonText(text);
 			if (!payload) {
 				wsError(ws, "Invalid JSON message", "invalid_json");
@@ -381,7 +412,13 @@ const server = Bun.serve<WsConnectionState>({
 
 			const parsed = WsClientMessageSchema.safeParse(payload);
 			if (!parsed.success) {
-				wsError(ws, "Invalid message payload", "invalid_payload", undefined, parsed.error.format());
+				wsError(
+					ws,
+					"Invalid message payload",
+					"invalid_payload",
+					undefined,
+					parsed.error.format(),
+				);
 				return;
 			}
 
@@ -409,9 +446,12 @@ const server = Bun.serve<WsConnectionState>({
 				}
 
 				case "session.create": {
+					log.ws(`Session created.`);
+
 					const requestId = message.request_id ?? crypto.randomUUID();
-					const cwd = message.cwd ?? process.cwd();
+					const cwd = message.cwd ?? config.defaultCwd;
 					const encodedCwd = encodeCwd(cwd);
+
 					void handlePromptMessage(ws, {
 						requestId,
 						prompt: message.prompt,
@@ -419,29 +459,57 @@ const server = Bun.serve<WsConnectionState>({
 						encodedCwd,
 						titleHint: message.title,
 					});
+
 					return;
 				}
 
 				case "session.resume":
 				case "session.send": {
+					if (!message.session_id) {
+						wsError(
+							ws,
+							"session_id is required",
+							"invalid_payload",
+							message.request_id,
+						);
+						return;
+					}
+
+					log.ws("Resuming session.");
+
 					const metadata = repository.getSessionMetadata(
 						message.session_id,
 						message.encoded_cwd,
 					);
-					const cwd = message.cwd ?? metadata?.cwd ?? process.cwd();
+
+					if (!metadata) {
+						wsError(
+							ws,
+							"Session not found",
+							"session_not_found",
+							message.request_id,
+						);
+						return;
+					}
+
+					const cwd = metadata.cwd;
 					const requestId = message.request_id ?? crypto.randomUUID();
+
 					void handlePromptMessage(ws, {
+						cwd,
 						requestId,
 						prompt: message.prompt,
-						cwd,
 						encodedCwd: message.encoded_cwd,
 						resumeSessionId: message.session_id,
 					});
+
 					return;
 				}
 
 				case "session.stop": {
-					const stopped = claudeService.stopRequest(message.request_id);
+					const stopped = claudeService.stopRequest(
+						message.request_id,
+					);
 					wsSend(ws, {
 						type: "session.state",
 						request_id: message.request_id,

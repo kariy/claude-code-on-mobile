@@ -174,8 +174,11 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(viewModel.messages) { message in
-                        MessageBubble(message: message)
-                            .id(message.id)
+                        MessageBubble(
+                            message: message,
+                            isStreaming: message.requestId != nil
+                        )
+                        .id(message.id)
                     }
                 }
                 .padding()
@@ -235,20 +238,49 @@ struct ContentView: View {
 
 private struct MessageBubble: View {
     let message: Message
+    var isStreaming: Bool = false
 
     var body: some View {
         HStack {
             if message.role == "user" { Spacer(minLength: 60) }
 
-            Text(message.text)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(message.role == "user" ? Color.blue : Color(white: 0.2))
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+            Group {
+                if message.role == "assistant" && message.text.isEmpty && isStreaming {
+                    TypingIndicator()
+                } else {
+                    Text(message.text)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(message.role == "user" ? Color.blue : Color(white: 0.2))
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
 
             if message.role == "assistant" { Spacer(minLength: 60) }
         }
+    }
+}
+
+private struct TypingIndicator: View {
+    @State private var animating = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .frame(width: 8, height: 8)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .offset(y: animating ? -4 : 4)
+                    .animation(
+                        .easeInOut(duration: 0.5)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.15),
+                        value: animating
+                    )
+            }
+        }
+        .onAppear { animating = true }
     }
 }
 
