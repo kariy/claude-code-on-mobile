@@ -12,7 +12,8 @@
     "test:manager": "bun test services/cc-manager/src",
     "ios:build": "bash scripts/ios-build.sh",
     "ios:install": "bash scripts/ios-install.sh",
-    "ios:build-install": "bash scripts/ios-build-install.sh"
+    "ios:build-install": "bash scripts/ios-build-install.sh",
+    "manager:clean": "rm -f ${CC_MANAGER_DB_PATH:-$HOME/.cc-manager/manager.db} && echo 'Database removed.'"
   },
   "devDependencies": {
     "@types/bun": "latest"

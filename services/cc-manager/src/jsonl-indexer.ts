@@ -57,7 +57,10 @@ export class ClaudeJsonlIndexer {
 					continue;
 				}
 
-				const existing = this.repository.getFileIndex(sessionId, encodedCwd);
+				const existing = this.repository.getFileIndex(
+					sessionId,
+					encodedCwd,
+				);
 				if (
 					existing &&
 					existing.file_mtime_ms === Math.floor(fileStat.mtimeMs) &&
@@ -70,14 +73,21 @@ export class ClaudeJsonlIndexer {
 				try {
 					const parsed = this.parseSessionJsonl(jsonlPath);
 					const decodedCwd = decodeEncodedCwd(encodedCwd);
-					const cwd = existsSync(decodedCwd) ? decodedCwd : encodedCwd;
+					const cwd = decodedCwd;
+
 					this.repository.upsertSessionMetadata({
 						sessionId,
 						encodedCwd,
 						cwd,
 						title:
 							parsed.firstUserText.length > 0
-								? truncate(parsed.firstUserText.replace(/\s+/g, " "), 120)
+								? truncate(
+										parsed.firstUserText.replace(
+											/\s+/g,
+											" ",
+										),
+										120,
+									)
 								: `Session ${sessionId.slice(0, 8)}`,
 						lastActivityAt: Math.floor(fileStat.mtimeMs),
 						source: "jsonl",
@@ -108,7 +118,10 @@ export class ClaudeJsonlIndexer {
 		encodedCwd: string;
 		cursor?: number;
 	}): SessionHistoryResult {
-		const filePath = this.resolveJsonlPath(params.sessionId, params.encodedCwd);
+		const filePath = this.resolveJsonlPath(
+			params.sessionId,
+			params.encodedCwd,
+		);
 		if (!filePath || !existsSync(filePath)) {
 			return { messages: [], nextCursor: null, totalMessages: 0 };
 		}
@@ -117,7 +130,9 @@ export class ClaudeJsonlIndexer {
 		const start = Math.max(0, params.cursor ?? 0);
 		const clipped = rows.slice(start, start + this.maxHistoryMessages);
 		const nextCursor =
-			start + clipped.length < rows.length ? start + clipped.length : null;
+			start + clipped.length < rows.length
+				? start + clipped.length
+				: null;
 
 		return {
 			messages: clipped,
@@ -126,7 +141,10 @@ export class ClaudeJsonlIndexer {
 		};
 	}
 
-	private resolveJsonlPath(sessionId: string, encodedCwd: string): string | null {
+	private resolveJsonlPath(
+		sessionId: string,
+		encodedCwd: string,
+	): string | null {
 		const row = this.repository.getFileIndex(sessionId, encodedCwd);
 		if (row?.jsonl_path) return row.jsonl_path;
 		return join(this.projectsDir, encodedCwd, `${sessionId}.jsonl`);

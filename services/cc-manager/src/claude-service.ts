@@ -16,13 +16,14 @@ export class ClaudeService {
 	private readonly running = new Map<string, ReturnType<typeof query>>();
 
 	async streamPrompt(args: StreamPromptArgs): Promise<void> {
-		console.log(args);
+		console.log("args", args);
+
 		const q = query({
 			prompt: args.prompt,
 			options: {
 				allowedTools: ["Read", "Glob", "Grep", "Bash"],
 				includePartialMessages: true,
-				...(args.cwd && { cwd: args.cwd }),
+				// ...(args.cwd && { cwd: args.cwd }),
 				...(args.resumeSessionId && { resume: args.resumeSessionId }),
 			},
 		});

@@ -186,7 +186,9 @@ export class ManagerRepository {
 
 	authenticateAccessToken(token: string): DeviceRecord | null {
 		const rows = this.db
-			.query("SELECT * FROM device_registrations WHERE revoked_at IS NULL")
+			.query(
+				"SELECT * FROM device_registrations WHERE revoked_at IS NULL",
+			)
 			.all() as DeviceRow[];
 
 		for (const row of rows) {
@@ -200,7 +202,9 @@ export class ManagerRepository {
 
 	private touchDevice(deviceId: string): void {
 		this.db
-			.query("UPDATE device_registrations SET last_seen_at = ? WHERE device_id = ?")
+			.query(
+				"UPDATE device_registrations SET last_seen_at = ? WHERE device_id = ?",
+			)
 			.run(nowMs(), deviceId);
 	}
 
@@ -239,7 +243,10 @@ export class ManagerRepository {
 	}): SessionMetadata {
 		const ts = nowMs();
 		const activity = params.lastActivityAt ?? ts;
-		const existing = this.getMetadataRow(params.sessionId, params.encodedCwd);
+		const existing = this.getMetadataRow(
+			params.sessionId,
+			params.encodedCwd,
+		);
 		const source: SessionMetadata["source"] = existing
 			? existing.source === params.source
 				? params.source

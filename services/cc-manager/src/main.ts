@@ -382,7 +382,7 @@ const server = Bun.serve<WsConnectionState>({
 			}
 		}
 
-		if (pathname === "/") {
+		if (pathname === "/" || pathname.startsWith("/sessions/")) {
 			return new Response(
 				Bun.file(new URL("../public/index.html", import.meta.url)),
 			);
@@ -496,6 +496,8 @@ const server = Bun.serve<WsConnectionState>({
 						);
 						return;
 					}
+
+					console.log("metadata", metadata);
 
 					const cwd = metadata.cwd;
 					const requestId = message.request_id ?? crypto.randomUUID();

@@ -337,6 +337,37 @@ let refreshInterval = null;
 
 const $ = (id) => document.getElementById(id);
 
+// ---- Routing ----
+function getRouteFromPath() {
+  const path = window.location.pathname;
+  const match = path.match(/^\/sessions\/([^/]+)$/);
+  if (match) return { view: "chat", sessionId: decodeURIComponent(match[1]) };
+  return { view: "sessions", sessionId: null };
+}
+
+function pushSessionUrl(sessionId) {
+  const url = "/sessions/" + encodeURIComponent(sessionId);
+  if (window.location.pathname !== url) {
+    history.pushState({ sessionId }, "", url);
+  }
+}
+
+function pushSessionsUrl() {
+  if (window.location.pathname !== "/") {
+    history.pushState({}, "", "/");
+  }
+}
+
+window.addEventListener("popstate", () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN || currentView === "connecting") return;
+  const route = getRouteFromPath();
+  if (route.view === "chat" && route.sessionId) {
+    openSessionById(route.sessionId, true);
+  } else {
+    returnToSessions(true);
+  }
+});
+
 // ---- Boot ----
 init();
 
@@ -446,20 +477,28 @@ function handleServerMessage(msg) {
     case "hello":
       break;
 
-    case "auth.ok":
+    case "auth.ok": {
       setStatus("Connected", true);
       $("disconnect-btn").style.display = "";
       activeSessionId = null;
       activeEncodedCwd = null;
       messages = [];
-      setView("sessions");
-      refreshSessions(true);
+      const route = getRouteFromPath();
+      refreshSessions(true).then(() => {
+        if (route.view === "chat" && route.sessionId) {
+          openSessionById(route.sessionId, true);
+        } else {
+          setView("sessions");
+        }
+      });
       startRefreshTimer();
       break;
+    }
 
     case "session.created":
       activeSessionId = msg.session_id;
       activeEncodedCwd = msg.encoded_cwd;
+      pushSessionUrl(msg.session_id);
       break;
 
     case "session.state":
@@ -543,7 +582,13 @@ function setView(view) {
   $("back-btn").style.display = view === "chat" ? "" : "none";
   $("new-session-fab").style.display = view === "sessions" ? "flex" : "none";
 
+  if (view === "sessions") {
+    $("header-title").textContent = "Claude Manager";
+  }
+
   if (view === "chat") {
+    const s = activeSessionId ? sessions.find(s => s.session_id === activeSessionId) : null;
+    $("header-title").textContent = s ? s.title || "Untitled session" : "New Session";
     $("msg-input").focus();
     scrollToBottom();
   }
@@ -595,9 +640,22 @@ function openSession(index) {
   activeEncodedCwd = s.encoded_cwd;
   messages = [];
   activeRequestIds.clear();
+  pushSessionUrl(s.session_id);
   setView("chat");
   renderMessages();
   loadHistory(s.session_id, s.encoded_cwd);
+}
+
+function openSessionById(sessionId, skipPush) {
+  const s = sessions.find(s => s.session_id === sessionId);
+  activeSessionId = sessionId;
+  activeEncodedCwd = s ? s.encoded_cwd : null;
+  messages = [];
+  activeRequestIds.clear();
+  if (!skipPush) pushSessionUrl(sessionId);
+  setView("chat");
+  renderMessages();
+  if (activeEncodedCwd) loadHistory(sessionId, activeEncodedCwd);
 }
 
 async function loadHistory(sessionId, encodedCwd) {
@@ -627,8 +685,9 @@ function startNewSession() {
   $("msg-input").focus();
 }
 
-function returnToSessions() {
+function returnToSessions(skipPush) {
   activeRequestIds.clear();
+  if (!skipPush) pushSessionsUrl();
   setView("sessions");
   refreshSessions(false);
 }
