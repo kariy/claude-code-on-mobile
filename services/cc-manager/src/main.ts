@@ -1,18 +1,10 @@
 import { ClaudeService } from "./claude-service";
 import { loadConfig } from "./config";
 import { ClaudeJsonlIndexer } from "./jsonl-indexer";
-import { AuthService } from "./auth";
-import {
-	badRequest,
-	jsonResponse,
-	notFound,
-	safeJson,
-	unauthorized,
-} from "./http-utils";
+import { jsonResponse, notFound } from "./http-utils";
 import { ManagerRepository } from "./repository";
-import { RegisterDeviceBodySchema, WsClientMessageSchema } from "./schemas";
+import { WsClientMessageSchema } from "./schemas";
 import type {
-	DeviceRecord,
 	HandlePromptParams,
 	WsErrorMessage,
 	WsServerMessage,
@@ -22,7 +14,6 @@ import { decodeEncodedCwd, encodeCwd, nowMs, truncate } from "./utils";
 
 const config = loadConfig();
 const repository = new ManagerRepository(config.dbPath);
-const authService = new AuthService(repository);
 const indexer = new ClaudeJsonlIndexer(
 	config.claudeProjectsDir,
 	repository,
@@ -37,8 +28,6 @@ log.index(
 
 interface WsConnectionState {
 	connectionId: string;
-	device: DeviceRecord | null;
-	isAuthed: boolean;
 	activeRequests: Set<string>;
 }
 
@@ -103,12 +92,6 @@ async function handlePromptMessage(
 	ws: Bun.ServerWebSocket<WsConnectionState>,
 	params: HandlePromptParams,
 ): Promise<void> {
-	const device = ws.data.device;
-	if (!device) {
-		wsError(ws, "Unauthorized", "unauthorized", params.requestId);
-		return;
-	}
-
 	let resolvedSessionId = params.resumeSessionId;
 
 	ws.data.activeRequests.add(params.requestId);
@@ -147,7 +130,7 @@ async function handlePromptMessage(
 				payload: {
 					cwd: params.cwd,
 					title: metadata.title,
-					device_id: device.deviceId,
+					device_id: "local",
 				},
 			});
 
@@ -163,7 +146,7 @@ async function handlePromptMessage(
 
 			if (!params.resumeSessionId) {
 				log.session(
-					`created session_id=${sessionId} connection_id=${ws.data.connectionId} device_id=${device.deviceId}`,
+					`created session_id=${sessionId} connection_id=${ws.data.connectionId}`,
 				);
 				wsSend(ws, {
 					type: "session.created",
@@ -205,7 +188,7 @@ async function handlePromptMessage(
 					payload: {
 						request_id: params.requestId,
 						streamed_chars: streamedChars,
-						device_id: device.deviceId,
+						device_id: "local",
 					},
 				});
 			}
@@ -227,7 +210,7 @@ async function handlePromptMessage(
 					payload: {
 						request_id: params.requestId,
 						error: String(error),
-						device_id: device.deviceId,
+						device_id: "local",
 					},
 				});
 			}
@@ -236,12 +219,6 @@ async function handlePromptMessage(
 	});
 
 	ws.data.activeRequests.delete(params.requestId);
-}
-
-function authenticateForRoute(req: Request): DeviceRecord | Response {
-	const device = authService.authenticateRequest(req);
-	if (!device) return unauthorized();
-	return device;
 }
 
 const server = Bun.serve<WsConnectionState>({
@@ -256,8 +233,6 @@ const server = Bun.serve<WsConnectionState>({
 			const upgraded = serverInstance.upgrade(req, {
 				data: {
 					connectionId: crypto.randomUUID(),
-					device: null,
-					isAuthed: false,
 					activeRequests: new Set<string>(),
 				},
 			});
@@ -277,47 +252,7 @@ const server = Bun.serve<WsConnectionState>({
 			});
 		}
 
-		if (
-			pathname === "/v1/bootstrap/register-device" &&
-			req.method === "POST"
-		) {
-			const body = await safeJson(req);
-			const parsed = RegisterDeviceBodySchema.safeParse(body ?? {});
-			if (!parsed.success) {
-				return badRequest(
-					"Invalid register-device payload",
-					parsed.error.format(),
-				);
-			}
-
-			if (
-				config.bootstrapNonce &&
-				parsed.data.bootstrap_nonce !== config.bootstrapNonce
-			) {
-				return jsonResponse(403, {
-					error: {
-						code: "bootstrap_forbidden",
-						message: "Invalid bootstrap nonce",
-					},
-				});
-			}
-
-			const registration = repository.registerDevice(
-				parsed.data.device_name ??
-					`ios-${crypto.randomUUID().slice(0, 8)}`,
-			);
-			return jsonResponse(201, {
-				device_id: registration.deviceId,
-				access_token: registration.accessToken,
-				refresh_token: registration.refreshToken,
-				issued_at: nowMs(),
-			});
-		}
-
 		if (pathname === "/v1/sessions" && req.method === "GET") {
-			const auth = authenticateForRoute(req);
-			if (auth instanceof Response) return auth;
-
 			if (url.searchParams.get("refresh") === "1") {
 				indexer.refreshIndex();
 			}
@@ -339,9 +274,6 @@ const server = Bun.serve<WsConnectionState>({
 
 		const sessionRoute = getSessionRouteMatch(pathname);
 		if (sessionRoute) {
-			const auth = authenticateForRoute(req);
-			if (auth instanceof Response) return auth;
-
 			if (sessionRoute.action === "history" && req.method === "GET") {
 				const encodedCwdParam = url.searchParams.get("encoded_cwd");
 				const sessionCandidates = repository.findSessionCandidates(
@@ -395,7 +327,7 @@ const server = Bun.serve<WsConnectionState>({
 			log.ws(`connected connection_id=${ws.data.connectionId}`);
 			wsSend(ws, {
 				type: "hello",
-				requires_auth: true,
+				requires_auth: false,
 				server_time: nowMs(),
 			});
 		},
@@ -428,28 +360,8 @@ const server = Bun.serve<WsConnectionState>({
 			}
 
 			const message = parsed.data;
-			if (message.type !== "auth.init" && !ws.data.isAuthed) {
-				wsError(ws, "Authentication required", "unauthorized");
-				return;
-			}
 
 			switch (message.type) {
-				case "auth.init": {
-					const device = authService.authenticateToken(message.token);
-					if (!device) {
-						wsError(ws, "Invalid access token", "unauthorized");
-						return;
-					}
-					ws.data.device = device;
-					ws.data.isAuthed = true;
-					wsSend(ws, {
-						type: "auth.ok",
-						device_id: device.deviceId,
-						device_name: device.deviceName,
-					});
-					return;
-				}
-
 				case "session.create": {
 					log.ws(`Session created.`);
 

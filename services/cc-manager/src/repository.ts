@@ -2,24 +2,11 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "fs";
 import { dirname } from "path";
 import type {
-	DeviceRecord,
 	JsonlIndexUpdate,
 	SessionMetadata,
 	SessionSummary,
 } from "./types";
-import { createSalt, createToken, hashWithSalt, nowMs } from "./utils";
-
-interface DeviceRow {
-	device_id: string;
-	device_name: string;
-	token_salt: string;
-	token_hash: string;
-	refresh_salt: string;
-	refresh_hash: string;
-	created_at: number;
-	last_seen_at: number;
-	revoked_at: number | null;
-}
+import { nowMs } from "./utils";
 
 interface SessionMetadataRow {
 	session_id: string;
@@ -75,20 +62,6 @@ export class ManagerRepository {
 
 		this.db.transaction(() => {
 			this.db.exec(`
-				CREATE TABLE IF NOT EXISTS device_registrations (
-					device_id TEXT PRIMARY KEY,
-					device_name TEXT NOT NULL,
-					token_salt TEXT NOT NULL,
-					token_hash TEXT NOT NULL,
-					refresh_salt TEXT NOT NULL,
-					refresh_hash TEXT NOT NULL,
-					created_at INTEGER NOT NULL,
-					last_seen_at INTEGER NOT NULL,
-					revoked_at INTEGER
-				);
-			`);
-
-			this.db.exec(`
 				CREATE TABLE IF NOT EXISTS session_metadata (
 					session_id TEXT NOT NULL,
 					encoded_cwd TEXT NOT NULL,
@@ -134,12 +107,6 @@ export class ManagerRepository {
 			this.db.exec(
 				"CREATE INDEX IF NOT EXISTS idx_session_events_lookup ON session_events(session_id, encoded_cwd, created_at DESC);",
 			);
-			this.db.exec(
-				"CREATE UNIQUE INDEX IF NOT EXISTS idx_device_token_hash ON device_registrations(token_hash);",
-			);
-			this.db.exec(
-				"CREATE UNIQUE INDEX IF NOT EXISTS idx_device_refresh_hash ON device_registrations(refresh_hash);",
-			);
 
 			this.db
 				.query(
@@ -147,79 +114,6 @@ export class ManagerRepository {
 				)
 				.run(nowMs());
 		})();
-	}
-
-	registerDevice(deviceName: string): {
-		deviceId: string;
-		accessToken: string;
-		refreshToken: string;
-	} {
-		const deviceId = crypto.randomUUID();
-		const accessToken = createToken(32);
-		const refreshToken = createToken(48);
-		const tokenSalt = createSalt(16);
-		const refreshSalt = createSalt(16);
-		const tokenHash = hashWithSalt(accessToken, tokenSalt);
-		const refreshHash = hashWithSalt(refreshToken, refreshSalt);
-		const ts = nowMs();
-
-		this.db
-			.query(
-				`INSERT INTO device_registrations (
-					device_id, device_name, token_salt, token_hash, refresh_salt, refresh_hash,
-					created_at, last_seen_at, revoked_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-			)
-			.run(
-				deviceId,
-				deviceName,
-				tokenSalt,
-				tokenHash,
-				refreshSalt,
-				refreshHash,
-				ts,
-				ts,
-			);
-
-		return { deviceId, accessToken, refreshToken };
-	}
-
-	authenticateAccessToken(token: string): DeviceRecord | null {
-		const rows = this.db
-			.query(
-				"SELECT * FROM device_registrations WHERE revoked_at IS NULL",
-			)
-			.all() as DeviceRow[];
-
-		for (const row of rows) {
-			if (hashWithSalt(token, row.token_salt) === row.token_hash) {
-				this.touchDevice(row.device_id);
-				return this.mapDeviceRow(row);
-			}
-		}
-		return null;
-	}
-
-	private touchDevice(deviceId: string): void {
-		this.db
-			.query(
-				"UPDATE device_registrations SET last_seen_at = ? WHERE device_id = ?",
-			)
-			.run(nowMs(), deviceId);
-	}
-
-	private mapDeviceRow(row: DeviceRow): DeviceRecord {
-		return {
-			deviceId: row.device_id,
-			deviceName: row.device_name,
-			tokenSalt: row.token_salt,
-			tokenHash: row.token_hash,
-			refreshSalt: row.refresh_salt,
-			refreshHash: row.refresh_hash,
-			createdAt: row.created_at,
-			lastSeenAt: row.last_seen_at,
-			revokedAt: row.revoked_at,
-		};
 	}
 
 	private getMetadataRow(

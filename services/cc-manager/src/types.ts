@@ -1,15 +1,3 @@
-export interface DeviceRecord {
-	deviceId: string;
-	deviceName: string;
-	tokenSalt: string;
-	tokenHash: string;
-	refreshSalt: string;
-	refreshHash: string;
-	createdAt: number;
-	lastSeenAt: number;
-	revokedAt: number | null;
-}
-
 export interface SessionMetadata {
 	sessionId: string;
 	encodedCwd: string;
@@ -55,12 +43,6 @@ export interface WsHelloMessage {
 	type: "hello";
 	requires_auth: boolean;
 	server_time: number;
-}
-
-export interface WsAuthOkMessage {
-	type: "auth.ok";
-	device_id: string;
-	device_name: string;
 }
 
 export interface WsSessionCreatedMessage {
@@ -109,7 +91,6 @@ export interface WsPongMessage {
 
 export type WsServerMessage =
 	| WsHelloMessage
-	| WsAuthOkMessage
 	| WsSessionCreatedMessage
 	| WsSessionStateMessage
 	| WsStreamDeltaMessage
@@ -118,13 +99,6 @@ export type WsServerMessage =
 	| WsPongMessage;
 
 // ── HTTP response bodies ────────────────────────────────────────
-
-export interface RegisterDeviceResponse {
-	device_id: string;
-	access_token: string;
-	refresh_token: string;
-	issued_at: number;
-}
 
 export interface SessionListItem {
 	session_id: string;

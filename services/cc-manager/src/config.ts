@@ -6,7 +6,6 @@ export interface ManagerConfig {
 	port: number;
 	dbPath: string;
 	claudeProjectsDir: string;
-	bootstrapNonce?: string;
 	allowedTools: string[];
 	maxHistoryMessages: number;
 	defaultCwd: string;
@@ -52,7 +51,6 @@ export function loadConfig(): ManagerConfig {
 		port: parseIntegerEnv("CC_MANAGER_PORT", 8787),
 		dbPath,
 		claudeProjectsDir,
-		bootstrapNonce: process.env.CC_MANAGER_BOOTSTRAP_NONCE,
 		allowedTools: parseAllowedTools(),
 		maxHistoryMessages: parseIntegerEnv("CC_MANAGER_MAX_HISTORY_MESSAGES", 5000),
 		defaultCwd: resolvePath(process.env.CC_MANAGER_DEFAULT_CWD ?? "/"),

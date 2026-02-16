@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import UIKit
 
 struct ClaudeSessionSummary: Identifiable, Equatable {
     let sessionId: String
@@ -36,8 +35,6 @@ final class ChatViewModel {
     private var refreshTimer: Timer?
     private var historyLoadTask: Task<Void, Never>?
 
-    private var accessToken: String?
-    private var deviceId: String?
     private var activeSessionId: String?
     private var activeEncodedCwd: String?
 
@@ -45,7 +42,6 @@ final class ChatViewModel {
 
     private enum DefaultsKey {
         static let host = "manager.host"
-        static let deviceId = "manager.deviceId"
     }
 
     init() {
@@ -75,27 +71,10 @@ final class ChatViewModel {
 
         persistConfig()
         isConnecting = true
-        connectionStatus = "Bootstrapping..."
+        connectionStatus = "Connecting..."
 
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.ensureAccessToken()
-                await MainActor.run {
-                    self.openWebSocket()
-                    self.isConnecting = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.isConnecting = false
-                    self.isConnected = false
-                    self.connectionStatus = "Connect failed"
-                    self.messages.append(
-                        Message(role: "assistant", text: "Connection error: \(error.localizedDescription)")
-                    )
-                }
-            }
-        }
+        openWebSocket()
+        isConnecting = false
     }
 
     func disconnect() {
@@ -242,65 +221,7 @@ final class ChatViewModel {
         sendWebSocket(payload)
     }
 
-    func clearSavedCredentials() {
-        let account = accountKey()
-        KeychainHelper.delete(account: "cc-manager-token:\(account)")
-        accessToken = nil
-        messages.append(Message(role: "assistant", text: "Saved credentials cleared."))
-    }
-
-    private func ensureAccessToken() async throws {
-        if accessToken == nil {
-            accessToken = try KeychainHelper.readString(account: "cc-manager-token:\(accountKey())")
-        }
-
-        if accessToken != nil {
-            return
-        }
-
-        var request = URLRequest(url: try managerHTTPURL(path: "/v1/bootstrap/register-device"))
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let deviceName = await MainActor.run { UIDevice.current.name }
-        let body: [String: String] = [
-            "device_name": deviceName,
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw NSError(domain: "manager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
-        }
-
-        guard (200...299).contains(http.statusCode) else {
-            let serverError = String(data: data, encoding: .utf8) ?? "Unknown bootstrap error"
-            throw NSError(domain: "manager", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: serverError])
-        }
-
-        guard
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let newDeviceId = json["device_id"] as? String,
-            let token = json["access_token"] as? String
-        else {
-            throw NSError(domain: "manager", code: -2, userInfo: [NSLocalizedDescriptionKey: "Invalid bootstrap payload"])
-        }
-
-        deviceId = newDeviceId
-        accessToken = token
-        defaults.set(newDeviceId, forKey: DefaultsKey.deviceId)
-        try KeychainHelper.saveString(token, account: "cc-manager-token:\(accountKey())")
-    }
-
     private func fetchSessions(forceRefresh: Bool) async throws -> [ClaudeSessionSummary] {
-        guard let accessToken else {
-            throw NSError(
-                domain: "manager",
-                code: -10,
-                userInfo: [NSLocalizedDescriptionKey: "Missing access token"]
-            )
-        }
-
         var queryItems: [URLQueryItem] = []
         if forceRefresh {
             queryItems.append(URLQueryItem(name: "refresh", value: "1"))
@@ -308,7 +229,6 @@ final class ChatViewModel {
 
         var request = URLRequest(url: try managerHTTPURL(path: "/v1/sessions", queryItems: queryItems))
         request.httpMethod = "GET"
-        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -359,14 +279,6 @@ final class ChatViewModel {
     }
 
     private func fetchSessionHistory(sessionId: String, encodedCwd: String) async throws -> [Message] {
-        guard let accessToken else {
-            throw NSError(
-                domain: "manager",
-                code: -13,
-                userInfo: [NSLocalizedDescriptionKey: "Missing access token"]
-            )
-        }
-
         let escapedSessionId = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId
         let queryItems = [URLQueryItem(name: "encoded_cwd", value: encodedCwd)]
         var request = URLRequest(
@@ -376,7 +288,6 @@ final class ChatViewModel {
             )
         )
         request.httpMethod = "GET"
-        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -433,17 +344,11 @@ final class ChatViewModel {
         webSocketTask?.resume()
 
         isConnected = true
-        connectionStatus = "Authenticating..."
+        connectionStatus = "Connected"
 
         receiveMessage()
         startRefreshTimer()
-
-        if let accessToken {
-            sendWebSocket([
-                "type": "auth.init",
-                "token": accessToken,
-            ])
-        }
+        refreshSessions(forceRefresh: true)
     }
 
     private func sendWebSocket(_ payload: [String: String]) {
@@ -520,15 +425,6 @@ final class ChatViewModel {
         case "hello":
             break
 
-        case "auth.ok":
-            isConnected = true
-            connectionStatus = "Connected"
-            isSessionViewActive = false
-            activeSessionId = nil
-            activeEncodedCwd = nil
-            messages.removeAll()
-            refreshSessions(forceRefresh: true)
-
         case "session.created":
             historyLoadTask?.cancel()
             historyLoadTask = nil
@@ -576,10 +472,6 @@ final class ChatViewModel {
         case "error":
             let message = json["message"] as? String ?? "Unknown server error"
             messages.append(Message(role: "assistant", text: "Error: \(message)"))
-            if let code = json["code"] as? String, code == "unauthorized" {
-                accessToken = nil
-                KeychainHelper.delete(account: "cc-manager-token:\(accountKey())")
-            }
             if let reqId = json["request_id"] as? String {
                 activeRequestIds.remove(reqId)
                 if let idx = messages.lastIndex(where: { $0.requestId == reqId }) {
@@ -596,19 +488,10 @@ final class ChatViewModel {
 
     private func loadPersistedConfig() {
         serverHost = defaults.string(forKey: DefaultsKey.host) ?? serverHost
-        deviceId = defaults.string(forKey: DefaultsKey.deviceId)
-
-        if !serverHost.isEmpty {
-            accessToken = try? KeychainHelper.readString(account: "cc-manager-token:\(accountKey())")
-        }
     }
 
     private func persistConfig() {
         defaults.set(serverHost, forKey: DefaultsKey.host)
-    }
-
-    private func accountKey() -> String {
-        "\(serverHost):\(managerPort)"
     }
 
     private func managerHTTPURL(path: String, queryItems: [URLQueryItem] = []) throws -> URL {

@@ -1,15 +1,5 @@
 import { z } from "zod";
 
-export const RegisterDeviceBodySchema = z.object({
-	device_name: z.string().min(1).max(128).optional(),
-	bootstrap_nonce: z.string().min(1).optional(),
-});
-
-export const WsAuthInitSchema = z.object({
-	type: z.literal("auth.init"),
-	token: z.string().min(1),
-});
-
 export const WsSessionCreateSchema = z.object({
 	type: z.literal("session.create"),
 	request_id: z.string().min(1).optional(),
@@ -48,7 +38,6 @@ export const WsPingSchema = z.object({
 });
 
 export const WsClientMessageSchema = z.discriminatedUnion("type", [
-	WsAuthInitSchema,
 	WsSessionCreateSchema,
 	WsSessionResumeSchema,
 	WsSessionSendSchema,
@@ -57,5 +46,4 @@ export const WsClientMessageSchema = z.discriminatedUnion("type", [
 	WsPingSchema,
 ]);
 
-export type RegisterDeviceBody = z.infer<typeof RegisterDeviceBodySchema>;
 export type WsClientMessage = z.infer<typeof WsClientMessageSchema>;

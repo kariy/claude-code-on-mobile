@@ -20,15 +20,6 @@ afterEach(() => {
 });
 
 describe("ManagerRepository", () => {
-	test("registers and authenticates a device token", () => {
-		const repo = createRepository();
-		const reg = repo.registerDevice("iphone-1");
-		const device = repo.authenticateAccessToken(reg.accessToken);
-		expect(device).not.toBeNull();
-		expect(device?.deviceName).toBe("iphone-1");
-		repo.close();
-	});
-
 	test("merges metadata sources when session exists in DB and JSONL", () => {
 		const repo = createRepository();
 		repo.upsertSessionMetadata({
