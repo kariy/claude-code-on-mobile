@@ -314,13 +314,21 @@ const server = Bun.serve<WsConnectionState>({
 			}
 		}
 
-		if (pathname === "/" || pathname.startsWith("/sessions/")) {
-			return new Response(
-				Bun.file(new URL("../public/index.html", import.meta.url)),
-			);
+		// Serve static assets from public/ (Vite build output)
+		const publicDir = new URL("../public/", import.meta.url);
+		if (pathname !== "/" && !pathname.startsWith("/sessions/")) {
+			const filePath = new URL(`.${pathname}`, publicDir);
+			const file = Bun.file(filePath);
+			if (await file.exists()) {
+				return new Response(file);
+			}
+			return notFound();
 		}
 
-		return notFound();
+		// SPA fallback: serve index.html for / and /sessions/*
+		return new Response(
+			Bun.file(new URL("../public/index.html", import.meta.url)),
+		);
 	},
 	websocket: {
 		open(ws) {
