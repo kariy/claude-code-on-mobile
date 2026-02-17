@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { useWebSocket } from "@/hooks/use-websocket";
-import type { WsServerMessage } from "@/types/ws";
+import type { WsServerMessage, WsSessionMeta } from "@/types/ws";
 import type { SDKMessage } from "@/types/sdk-messages";
 import type { SessionListItem, HistoryMessage } from "@/types/api";
 import { fetchSessions, fetchHistory } from "@/lib/api";
@@ -19,6 +19,7 @@ interface AppState {
   sessions: SessionListItem[];
   activeSessionId: string | null;
   activeEncodedCwd: string | null;
+  activeSessionMeta: WsSessionMeta | null;
   messages: ChatMessage[];
   activeRequestIds: Set<string>;
 }
@@ -28,6 +29,7 @@ const initialState: AppState = {
   sessions: [],
   activeSessionId: null,
   activeEncodedCwd: null,
+  activeSessionMeta: null,
   messages: [],
   activeRequestIds: new Set(),
 };
@@ -56,7 +58,8 @@ type Action =
   | { type: "SESSION_STATE"; sessionId?: string; encodedCwd?: string }
   | { type: "SDK_MESSAGE"; requestId: string; sdkMessage: SDKMessage }
   | { type: "STREAM_DONE"; requestId: string }
-  | { type: "ERROR"; requestId?: string; message: string };
+  | { type: "ERROR"; requestId?: string; message: string }
+  | { type: "SET_SESSION_META"; meta: WsSessionMeta };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -86,6 +89,7 @@ function reducer(state: AppState, action: Action): AppState {
         view: "chat",
         activeSessionId: null,
         activeEncodedCwd: null,
+        activeSessionMeta: null,
         messages: [],
         activeRequestIds: new Set(),
       };
@@ -94,6 +98,7 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         view: "sessions",
+        activeSessionMeta: null,
         activeRequestIds: new Set(),
       };
 
@@ -265,6 +270,9 @@ function reducer(state: AppState, action: Action): AppState {
       );
       return { ...state, messages: msgs, activeRequestIds: newIds };
     }
+
+    case "SET_SESSION_META":
+      return { ...state, activeSessionMeta: action.meta };
 
     case "ERROR": {
       const errText = "Error: " + action.message;
@@ -490,6 +498,9 @@ export default function App() {
           sessionId: msg.session_id,
           encodedCwd: msg.encoded_cwd,
         });
+        if (msg.session) {
+          dispatch({ type: "SET_SESSION_META", meta: msg.session });
+        }
         pushUrl("/sessions/" + encodeURIComponent(msg.session_id));
         break;
 
@@ -500,6 +511,9 @@ export default function App() {
             sessionId: msg.session_id,
             encodedCwd: msg.encoded_cwd,
           });
+        }
+        if (msg.session) {
+          dispatch({ type: "SET_SESSION_META", meta: msg.session });
         }
         if (
           msg.status === "index_refreshed" &&
@@ -522,10 +536,26 @@ export default function App() {
           requestId: msg.request_id,
           sdkMessage: msg.sdk_message,
         });
+        if (msg.session && msg.session.total_cost_usd !== stateRef.current.activeSessionMeta?.total_cost_usd) {
+          dispatch({ type: "SET_SESSION_META", meta: msg.session });
+        }
         break;
 
       case "stream.done":
         dispatch({ type: "STREAM_DONE", requestId: msg.request_id });
+        if (msg.session) {
+          dispatch({ type: "SET_SESSION_META", meta: msg.session });
+          // Update the sessions list so cost is fresh when returning to sessions view
+          const sm = msg.session;
+          dispatch({
+            type: "SET_SESSIONS",
+            sessions: stateRef.current.sessions.map((s) =>
+              s.session_id === sm.session_id && s.encoded_cwd === sm.encoded_cwd
+                ? { ...s, total_cost_usd: sm.total_cost_usd, last_activity_at: sm.last_activity_at, updated_at: sm.updated_at }
+                : s,
+            ),
+          });
+        }
         break;
 
       case "error":
@@ -682,7 +712,10 @@ export default function App() {
   let headerTitle = "Claude Manager";
   let headerCost: number | undefined;
   if (state.view === "chat") {
-    if (state.activeSessionId) {
+    if (state.activeSessionMeta) {
+      headerTitle = state.activeSessionMeta.title || "Untitled session";
+      headerCost = state.activeSessionMeta.total_cost_usd;
+    } else if (state.activeSessionId) {
       const s = state.sessions.find(
         (s) => s.session_id === state.activeSessionId,
       );

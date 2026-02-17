@@ -2,6 +2,18 @@
 
 import type { SDKMessage } from "./sdk-messages";
 
+export interface WsSessionMeta {
+  session_id: string;
+  encoded_cwd: string;
+  cwd: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  last_activity_at: number;
+  source: string;
+  total_cost_usd: number;
+}
+
 export interface WsHelloMessage {
   type: "hello";
   requires_auth: boolean;
@@ -14,6 +26,7 @@ export interface WsSessionCreatedMessage {
   session_id: string;
   encoded_cwd: string;
   cwd: string;
+  session?: WsSessionMeta;
 }
 
 export interface WsSessionStateMessage {
@@ -23,6 +36,7 @@ export interface WsSessionStateMessage {
   encoded_cwd?: string;
   status: string;
   stats?: unknown;
+  session?: WsSessionMeta;
 }
 
 export interface WsStreamMessageMessage {
@@ -30,6 +44,7 @@ export interface WsStreamMessageMessage {
   request_id: string;
   session_id?: string;
   sdk_message: SDKMessage;
+  session?: WsSessionMeta;
 }
 
 export interface WsStreamDoneMessage {
@@ -37,6 +52,7 @@ export interface WsStreamDoneMessage {
   request_id: string;
   session_id?: string;
   encoded_cwd: string;
+  session?: WsSessionMeta;
 }
 
 export interface WsErrorMessage {

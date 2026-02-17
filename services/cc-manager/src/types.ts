@@ -39,6 +39,34 @@ export interface JsonlIndexUpdate {
 	fileMtimeMs: number;
 }
 
+// ── WebSocket session metadata (wire format) ────────────────────
+
+export interface WsSessionMeta {
+	session_id: string;
+	encoded_cwd: string;
+	cwd: string;
+	title: string;
+	created_at: number;
+	updated_at: number;
+	last_activity_at: number;
+	source: string;
+	total_cost_usd: number;
+}
+
+export function toWsSessionMeta(m: SessionMetadata): WsSessionMeta {
+	return {
+		session_id: m.sessionId,
+		encoded_cwd: m.encodedCwd,
+		cwd: m.cwd,
+		title: m.title,
+		created_at: m.createdAt,
+		updated_at: m.updatedAt,
+		last_activity_at: m.lastActivityAt,
+		source: m.source,
+		total_cost_usd: m.totalCostUsd,
+	};
+}
+
 // ── WebSocket server→client messages ────────────────────────────
 
 export interface WsHelloMessage {
@@ -53,6 +81,7 @@ export interface WsSessionCreatedMessage {
 	session_id: string;
 	encoded_cwd: string;
 	cwd: string;
+	session?: WsSessionMeta;
 }
 
 export interface WsSessionStateMessage {
@@ -62,6 +91,7 @@ export interface WsSessionStateMessage {
 	encoded_cwd?: string;
 	status: string;
 	stats?: unknown;
+	session?: WsSessionMeta;
 }
 
 export interface WsStreamMessageMessage {
@@ -69,6 +99,7 @@ export interface WsStreamMessageMessage {
 	request_id: string;
 	session_id?: string;
 	sdk_message: unknown;
+	session?: WsSessionMeta;
 }
 
 export interface WsStreamDoneMessage {
@@ -76,6 +107,7 @@ export interface WsStreamDoneMessage {
 	request_id: string;
 	session_id?: string;
 	encoded_cwd: string;
+	session?: WsSessionMeta;
 }
 
 export interface WsErrorMessage {

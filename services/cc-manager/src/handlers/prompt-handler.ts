@@ -1,5 +1,6 @@
 import type { App } from "../app";
-import type { HandlePromptParams, WsConnectionState } from "../types";
+import type { HandlePromptParams, WsConnectionState, WsSessionMeta } from "../types";
+import { toWsSessionMeta } from "../types";
 import { nowMs, truncate } from "../utils";
 import { wsError, wsSend } from "../ws-utils";
 import { log } from "../logger";
@@ -15,6 +16,7 @@ export function createPromptHandler(app: App) {
 		ws.data.activeRequests.add(params.requestId);
 		let streamedChars = 0;
 		let totalCostUsd = 0;
+		let sessionMeta: WsSessionMeta | undefined;
 
 		await app.claudeService.streamPrompt({
 			requestId: params.requestId,
@@ -42,6 +44,8 @@ export function createPromptHandler(app: App) {
 					? "session_resumed"
 					: "session_created";
 
+				sessionMeta = toWsSessionMeta(metadata);
+
 				app.repository.recordEvent({
 					sessionId,
 					eventType,
@@ -60,6 +64,7 @@ export function createPromptHandler(app: App) {
 						session_id: sessionId,
 						encoded_cwd: params.encodedCwd,
 						status: "session_resumed",
+						session: sessionMeta,
 					});
 				}
 
@@ -73,6 +78,7 @@ export function createPromptHandler(app: App) {
 						session_id: sessionId,
 						encoded_cwd: params.encodedCwd,
 						cwd: params.cwd,
+						session: sessionMeta,
 					});
 				}
 			},
@@ -97,13 +103,16 @@ export function createPromptHandler(app: App) {
 					request_id: params.requestId,
 					session_id: resolvedSessionId,
 					sdk_message: message,
+					session: sessionMeta
+						? { ...sessionMeta, total_cost_usd: sessionMeta.total_cost_usd + totalCostUsd }
+						: undefined,
 				});
 			},
 			onDone: () => {
 				log.session(`On done. sessionId=${resolvedSessionId}`);
 
 				if (resolvedSessionId) {
-					app.repository.upsertSessionMetadata({
+					const freshMetadata = app.repository.upsertSessionMetadata({
 						sessionId: resolvedSessionId,
 						encodedCwd: params.encodedCwd,
 						cwd: params.cwd,
@@ -115,6 +124,7 @@ export function createPromptHandler(app: App) {
 						source: "db",
 						costToAdd: totalCostUsd,
 					});
+					sessionMeta = toWsSessionMeta(freshMetadata);
 					app.repository.recordEvent({
 						sessionId: resolvedSessionId,
 						encodedCwd: params.encodedCwd,
@@ -132,6 +142,7 @@ export function createPromptHandler(app: App) {
 					request_id: params.requestId,
 					session_id: resolvedSessionId,
 					encoded_cwd: params.encodedCwd,
+					session: sessionMeta,
 				});
 			},
 			onError: (error) => {

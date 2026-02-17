@@ -212,7 +212,18 @@ Sent when a new session is created (in response to `session.create`).
   "request_id": "req-1",
   "session_id": "abc-123",
   "encoded_cwd": "-Users-me-project",
-  "cwd": "/Users/me/project"
+  "cwd": "/Users/me/project",
+  "session": {                           // full session metadata snapshot
+    "session_id": "abc-123",
+    "encoded_cwd": "-Users-me-project",
+    "cwd": "/Users/me/project",
+    "title": "Fix login bug",
+    "created_at": 1705300000000,
+    "updated_at": 1705300100000,
+    "last_activity_at": 1705300100000,
+    "source": "db",
+    "total_cost_usd": 0.0
+  }
 }
 ```
 
@@ -227,7 +238,8 @@ Sent for state transitions: session resumed, session stopped, index refreshed.
   "session_id": "abc-123",      // present for resume, absent for stop/index refresh
   "encoded_cwd": "-Users-me-p", // present for resume, absent for stop/index refresh
   "status": "<string>",         // see status values below
-  "stats": { ... }              // present only for "index_refreshed"
+  "stats": { ... },             // present only for "index_refreshed"
+  "session": { ... }            // present for "session_resumed"; same shape as session.created
 }
 ```
 
@@ -249,7 +261,8 @@ Forwarded SDK message from the Claude Agent SDK streaming response. Sent zero or
   "type": "stream.message",
   "request_id": "req-1",
   "session_id": "abc-123",   // may be undefined before session ID is resolved
-  "sdk_message": { ... }     // raw SDKMessage from @anthropic-ai/claude-agent-sdk
+  "sdk_message": { ... },    // raw SDKMessage from @anthropic-ai/claude-agent-sdk
+  "session": { ... }         // session metadata snapshot; same shape as session.created
 }
 ```
 
@@ -263,8 +276,19 @@ Sent when a prompt completes successfully.
 {
   "type": "stream.done",
   "request_id": "req-1",
-  "session_id": "abc-123",         // may be undefined if session ID was never resolved
-  "encoded_cwd": "-Users-me-project"
+  "session_id": "abc-123",          // may be undefined if session ID was never resolved
+  "encoded_cwd": "-Users-me-project",
+  "session": {                       // fresh metadata with accumulated cost
+    "session_id": "abc-123",
+    "encoded_cwd": "-Users-me-project",
+    "cwd": "/Users/me/project",
+    "title": "Fix login bug",
+    "created_at": 1705300000000,
+    "updated_at": 1705300100000,
+    "last_activity_at": 1705300100000,
+    "source": "db",
+    "total_cost_usd": 0.42
+  }
 }
 ```
 

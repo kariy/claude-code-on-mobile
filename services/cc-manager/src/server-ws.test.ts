@@ -101,7 +101,7 @@ describe("session.create flow", () => {
 		]);
 	});
 
-	test("session.created has session_id, request_id, encoded_cwd, cwd", async () => {
+	test("session.created has session_id, request_id, encoded_cwd, cwd, session", async () => {
 		await connect();
 		await ws.nextMessage(); // consume hello
 
@@ -118,6 +118,16 @@ describe("session.create flow", () => {
 		expect(typeof created.session_id).toBe("string");
 		expect(typeof created.encoded_cwd).toBe("string");
 		expect(typeof created.cwd).toBe("string");
+
+		const session = created.session as Record<string, unknown>;
+		expect(session).toBeDefined();
+		expect(session.session_id).toBe(created.session_id);
+		expect(typeof session.title).toBe("string");
+		expect(typeof session.total_cost_usd).toBe("number");
+		expect(typeof session.created_at).toBe("number");
+		expect(typeof session.updated_at).toBe("number");
+		expect(typeof session.last_activity_at).toBe("number");
+		expect(typeof session.source).toBe("string");
 	});
 
 	test("stream.done has request_id matching the original request", async () => {
@@ -139,6 +149,11 @@ describe("session.create flow", () => {
 			(m) => (m as Record<string, unknown>).type === "stream.done",
 		) as Record<string, unknown>;
 		expect(done.request_id).toBe("req-match");
+
+		const session = done.session as Record<string, unknown>;
+		expect(session).toBeDefined();
+		expect(typeof session.session_id).toBe("string");
+		expect(typeof session.total_cost_usd).toBe("number");
 	});
 
 	test("without request_id, server generates one (non-empty string)", async () => {
@@ -210,6 +225,11 @@ describe("session.resume/send flow", () => {
 
 		const state = messages[0] as Record<string, unknown>;
 		expect(state.status).toBe("session_resumed");
+
+		const session = state.session as Record<string, unknown>;
+		expect(session).toBeDefined();
+		expect(session.session_id).toBe(sessionId);
+		expect(typeof session.total_cost_usd).toBe("number");
 	});
 
 	test("with non-existent session → receives error(session_not_found)", async () => {
