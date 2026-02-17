@@ -12,7 +12,12 @@ export interface StreamPromptArgs {
 	onError: (error: unknown) => void;
 }
 
-export class ClaudeService {
+export interface ClaudeServiceLike {
+	streamPrompt(args: StreamPromptArgs): Promise<void>;
+	stopRequest(requestId: string): boolean;
+}
+
+export class ClaudeService implements ClaudeServiceLike {
 	private readonly running = new Map<string, ReturnType<typeof query>>();
 
 	async streamPrompt(args: StreamPromptArgs): Promise<void> {
