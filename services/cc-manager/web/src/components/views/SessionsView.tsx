@@ -10,6 +10,7 @@ interface SessionsViewProps {
   onRefresh: () => void;
   onOpenSession: (index: number) => void;
   onNewSession: () => void;
+  onOpenTerminal?: (index: number) => void;
 }
 
 export function SessionsView({
@@ -17,6 +18,7 @@ export function SessionsView({
   onRefresh,
   onOpenSession,
   onNewSession,
+  onOpenTerminal,
 }: SessionsViewProps) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -41,6 +43,7 @@ export function SessionsView({
               key={session.session_id + session.encoded_cwd}
               session={session}
               onClick={() => onOpenSession(i)}
+              onOpenTerminal={onOpenTerminal ? () => onOpenTerminal(i) : undefined}
             />
           ))
         )}

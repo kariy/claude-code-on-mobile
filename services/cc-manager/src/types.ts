@@ -166,10 +166,27 @@ export interface HealthResponse {
 
 // ── WebSocket connection state ───────────────────────────────────
 
-export interface WsConnectionState {
+import type { TerminalHandle } from "./terminal-service";
+
+export interface WsSessionState {
+	kind: "session";
 	connectionId: string;
 	activeRequests: Set<string>;
 }
+
+export interface WsTerminalState {
+	kind: "terminal";
+	connectionId: string;
+	terminal: TerminalHandle | null;
+	sessionId: string;
+	encodedCwd: string;
+	cwd: string;
+	sshDestination: string;
+	cols: number;
+	rows: number;
+}
+
+export type WsConnectionState = WsSessionState | WsTerminalState;
 
 // ── Internal param types ────────────────────────────────────────
 

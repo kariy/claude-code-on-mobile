@@ -469,6 +469,82 @@ Keepalive ping.
 
 ---
 
+## Terminal WebSocket API
+
+**Endpoint:** `ws://{host}:{port}/v1/terminal?session_id=X&encoded_cwd=Y&ssh_destination=user@host&cols=80&rows=24`
+
+Opens an interactive terminal session via SSH to a client-specified remote host. This is a **raw terminal I/O** WebSocket — completely separate from the session management WebSocket at `/v1/ws`.
+
+### Query parameters
+
+| Name              | Type   | Required | Default | Description                        |
+| ----------------- | ------ | -------- | ------- | ---------------------------------- |
+| `session_id`      | string | yes      |         | Claude session ID to resume        |
+| `encoded_cwd`     | string | yes      |         | Encoded working directory          |
+| `ssh_destination` | string | yes      |         | SSH destination (e.g. `user@host`) |
+| `cols`            | number | no       | `80`    | Initial terminal columns           |
+| `rows`            | number | no       | `24`    | Initial terminal rows              |
+
+### Connection flow
+
+1. Server validates query parameters
+2. Server looks up session metadata to resolve working directory
+3. Server spawns `ssh -t <destination> "cd '<cwd>' && claude -r '<session_id>'"`
+4. WebSocket upgrades; raw terminal data flows bidirectionally
+
+### Data flow
+
+All messages are **raw text frames** — no JSON wrapping, no base64.
+
+- **Server → Client:** Raw terminal output bytes from the PTY
+- **Client → Server:** Raw keystrokes
+
+### Resize control message
+
+The client can send a JSON text frame to resize the terminal:
+
+```json
+{
+  "type": "resize",
+  "cols": 120,
+  "rows": 40
+}
+```
+
+The server distinguishes resize messages from raw input by checking if the message parses as JSON with a `type` field. Normal terminal keystrokes are never valid JSON objects with a `type` field.
+
+### Connection close
+
+- **PTY exits** → server closes the WebSocket with code `1000`
+- **Client closes WebSocket** → server kills the PTY process
+- **Either side** can initiate the close
+
+### Error responses
+
+If the WebSocket upgrade fails at the HTTP level, the server returns a JSON error response:
+
+**`400`** — Missing parameters:
+```json
+{ "error": { "code": "invalid_params", "message": "session_id and encoded_cwd are required" } }
+```
+
+**`400`** — Missing `ssh_destination`:
+```json
+{ "error": { "code": "invalid_params", "message": "ssh_destination is required" } }
+```
+
+**`404`** — Session not found:
+```json
+{ "error": { "code": "session_not_found", "message": "Session not found" } }
+```
+
+**`400`** — WebSocket upgrade failed:
+```json
+{ "error": { "code": "upgrade_failed", "message": "WebSocket upgrade failed" } }
+```
+
+---
+
 ## Configuration
 
 All configuration is via environment variables prefixed `CC_MANAGER_`.

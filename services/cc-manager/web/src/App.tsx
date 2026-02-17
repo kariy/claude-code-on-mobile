@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useWebSocket } from "@/hooks/use-websocket";
+import { useTerminal } from "@/hooks/use-terminal";
 import type { WsServerMessage, WsSessionMeta } from "@/types/ws";
 import type { SDKMessage } from "@/types/sdk-messages";
 import type { SessionListItem, HistoryMessage } from "@/types/api";
 import { fetchSessions, fetchHistory } from "@/lib/api";
+import { getSshDestination, setSshDestination } from "@/lib/settings";
 import { Header } from "@/components/layout/Header";
+import { SshDestinationDialog } from "@/components/SshDestinationDialog";
 import { ConnectingView } from "@/components/views/ConnectingView";
 import { SessionsView } from "@/components/views/SessionsView";
 import { ChatView } from "@/components/views/ChatView";
+import { TerminalView } from "@/components/views/TerminalView";
 import type { ChatMessage, ContentBlockState } from "@/types/chat";
 
 // ── State ──
 
-type View = "connecting" | "sessions" | "chat";
+type View = "connecting" | "sessions" | "chat" | "terminal";
 
 interface AppState {
   view: View;
@@ -59,7 +63,9 @@ type Action =
   | { type: "SDK_MESSAGE"; requestId: string; sdkMessage: SDKMessage }
   | { type: "STREAM_DONE"; requestId: string }
   | { type: "ERROR"; requestId?: string; message: string }
-  | { type: "SET_SESSION_META"; meta: WsSessionMeta };
+  | { type: "SET_SESSION_META"; meta: WsSessionMeta }
+  | { type: "OPEN_TERMINAL"; sessionId: string; encodedCwd: string }
+  | { type: "CLOSE_TERMINAL" };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -305,6 +311,20 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
 
+    case "OPEN_TERMINAL":
+      return {
+        ...state,
+        view: "terminal",
+        activeSessionId: action.sessionId,
+        activeEncodedCwd: action.encodedCwd,
+      };
+
+    case "CLOSE_TERMINAL":
+      return {
+        ...state,
+        view: "sessions",
+      };
+
     default:
       return state;
   }
@@ -431,6 +451,12 @@ export default function App() {
   stateRef.current = state;
   const refreshTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const hasConnectedRef = useRef(false);
+  const terminal = useTerminal();
+  const [showSshDialog, setShowSshDialog] = useState(false);
+  const [pendingTerminalSession, setPendingTerminalSession] = useState<{
+    sessionId: string;
+    encodedCwd: string;
+  } | null>(null);
 
   const handleWsMessage = useCallback((msg: WsServerMessage) => {
     switch (msg.type) {
@@ -702,6 +728,63 @@ export default function App() {
     [status, send],
   );
 
+  const handleOpenTerminal = useCallback(
+    (index: number) => {
+      const s = state.sessions[index];
+      if (!s) return;
+
+      const dest = getSshDestination();
+      if (!dest) {
+        setPendingTerminalSession({ sessionId: s.session_id, encodedCwd: s.encoded_cwd });
+        setShowSshDialog(true);
+        return;
+      }
+
+      dispatch({
+        type: "OPEN_TERMINAL",
+        sessionId: s.session_id,
+        encodedCwd: s.encoded_cwd,
+      });
+      terminal.open(s.session_id, s.encoded_cwd, dest);
+    },
+    [state.sessions, terminal],
+  );
+
+  const handleSshDialogSave = useCallback(
+    (value: string) => {
+      setSshDestination(value);
+      setShowSshDialog(false);
+
+      if (pendingTerminalSession) {
+        const { sessionId, encodedCwd } = pendingTerminalSession;
+        setPendingTerminalSession(null);
+        dispatch({ type: "OPEN_TERMINAL", sessionId, encodedCwd });
+        terminal.open(sessionId, encodedCwd, value);
+      }
+    },
+    [pendingTerminalSession, terminal],
+  );
+
+  const handleSshDialogCancel = useCallback(() => {
+    setShowSshDialog(false);
+    setPendingTerminalSession(null);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setShowSshDialog(true);
+  }, []);
+
+  const handleCloseTerminal = useCallback(() => {
+    terminal.close();
+    dispatch({ type: "CLOSE_TERMINAL" });
+    pushUrl("/");
+    fetchSessions(false)
+      .then((data) =>
+        dispatch({ type: "SET_SESSIONS", sessions: data.sessions }),
+      )
+      .catch(() => {});
+  }, [terminal]);
+
   const handleDisconnect = useCallback(() => {
     disconnect();
     dispatch({ type: "SET_VIEW", view: "connecting" });
@@ -724,6 +807,11 @@ export default function App() {
     } else {
       headerTitle = "New Session";
     }
+  } else if (state.view === "terminal") {
+    const s = state.sessions.find(
+      (s) => s.session_id === state.activeSessionId,
+    );
+    headerTitle = s?.title || "Terminal";
   }
 
   return (
@@ -731,10 +819,11 @@ export default function App() {
       <Header
         title={headerTitle}
         status={status}
-        showBack={state.view === "chat"}
+        showBack={state.view === "chat" || state.view === "terminal"}
         totalCostUsd={headerCost}
-        onBack={handleReturnToSessions}
+        onBack={state.view === "terminal" ? handleCloseTerminal : handleReturnToSessions}
         onDisconnect={handleDisconnect}
+        onSettings={state.view === "sessions" ? handleOpenSettings : undefined}
       />
       {state.view === "connecting" && <ConnectingView />}
       {state.view === "sessions" && (
@@ -743,6 +832,7 @@ export default function App() {
           onRefresh={handleRefresh}
           onOpenSession={handleOpenSession}
           onNewSession={handleNewSession}
+          onOpenTerminal={handleOpenTerminal}
         />
       )}
       {state.view === "chat" && (
@@ -750,6 +840,19 @@ export default function App() {
           messages={state.messages}
           activeRequestIds={state.activeRequestIds}
           onSend={handleSendMessage}
+        />
+      )}
+      {state.view === "terminal" && (
+        <TerminalView
+          status={terminal.status}
+          containerRef={terminal.containerRef}
+          onClose={handleCloseTerminal}
+        />
+      )}
+      {showSshDialog && (
+        <SshDestinationDialog
+          onSave={handleSshDialogSave}
+          onCancel={handleSshDialogCancel}
         />
       )}
     </div>

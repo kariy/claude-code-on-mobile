@@ -30,6 +30,9 @@ export const log = {
 	session(message: string) {
 		logScope("session", 32, message);
 	},
+	terminal(message: string) {
+		logScope("terminal", 93, message);
+	},
 	startup(message: string) {
 		logScope("startup", 96, message);
 	},

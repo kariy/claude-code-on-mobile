@@ -1,11 +1,13 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, TerminalSquare } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { relativeTime } from "@/lib/utils";
 import type { SessionListItem } from "@/types/api";
 
 interface SessionCardProps {
   session: SessionListItem;
   onClick: () => void;
+  onOpenTerminal?: () => void;
 }
 
 function formatCost(usd: number): string {
@@ -13,7 +15,7 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-export function SessionCard({ session, onClick }: SessionCardProps) {
+export function SessionCard({ session, onClick, onOpenTerminal }: SessionCardProps) {
   return (
     <Card
       className="flex items-center gap-2.5 p-3 cursor-pointer transition-colors hover:bg-secondary/60 mb-2.5"
@@ -38,6 +40,20 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
           )}
         </div>
       </div>
+      {onOpenTerminal && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 rounded-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenTerminal();
+          }}
+          title="Open in terminal"
+        >
+          <TerminalSquare className="h-4 w-4 text-muted-foreground" />
+        </Button>
+      )}
       <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
     </Card>
   );

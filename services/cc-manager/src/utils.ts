@@ -19,6 +19,10 @@ export function decodeEncodedCwd(encodedCwd: string): string {
 	return encodedCwd.replace(/-/g, "/");
 }
 
+export function shellEscape(s: string): string {
+	return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
 export function extractTextBlocks(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";

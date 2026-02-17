@@ -1,5 +1,5 @@
 import type { App } from "../app";
-import type { HandlePromptParams, WsConnectionState, WsSessionMeta } from "../types";
+import type { HandlePromptParams, WsSessionState, WsSessionMeta } from "../types";
 import { toWsSessionMeta } from "../types";
 import { nowMs, truncate } from "../utils";
 import { wsError, wsSend } from "../ws-utils";
@@ -8,7 +8,7 @@ import { log } from "../logger";
 export function createPromptHandler(app: App) {
 
 	return async function handlePromptMessage(
-		ws: Bun.ServerWebSocket<WsConnectionState>,
+		ws: Bun.ServerWebSocket<WsSessionState>,
 		params: HandlePromptParams,
 	): Promise<void> {
 		let resolvedSessionId = params.resumeSessionId;

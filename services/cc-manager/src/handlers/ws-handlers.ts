@@ -1,6 +1,6 @@
 import type { App } from "../app";
 import { WsClientMessageSchema, type WsClientMessage } from "../schemas";
-import type { WsConnectionState } from "../types";
+import type { WsSessionState } from "../types";
 import { encodeCwd, nowMs } from "../utils";
 import { formatWsLogPayload, parseJsonText, wsError, wsSend } from "../ws-utils";
 import { log } from "../logger";
@@ -9,9 +9,9 @@ import { createPromptHandler } from "./prompt-handler";
 export function createWsHandlers(app: App) {
 	const handlePromptMessage = createPromptHandler(app);
 
-	type WsHandler = (ws: Bun.ServerWebSocket<WsConnectionState>, message: WsClientMessage) => void;
+	type WsHandler = (ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) => void;
 
-	function handleSessionCreate(ws: Bun.ServerWebSocket<WsConnectionState>, message: WsClientMessage) {
+	function handleSessionCreate(ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) {
 		if (message.type !== "session.create") return;
 		log.ws("Session created.");
 
@@ -28,7 +28,7 @@ export function createWsHandlers(app: App) {
 		});
 	}
 
-	function handleSessionResumeOrSend(ws: Bun.ServerWebSocket<WsConnectionState>, message: WsClientMessage) {
+	function handleSessionResumeOrSend(ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) {
 		if (message.type !== "session.resume" && message.type !== "session.send") return;
 
 		if (!message.session_id) {
@@ -60,7 +60,7 @@ export function createWsHandlers(app: App) {
 		});
 	}
 
-	function handleSessionStop(ws: Bun.ServerWebSocket<WsConnectionState>, message: WsClientMessage) {
+	function handleSessionStop(ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) {
 		if (message.type !== "session.stop") return;
 
 		const stopped = app.claudeService.stopRequest(message.request_id);
@@ -72,7 +72,7 @@ export function createWsHandlers(app: App) {
 		ws.data.activeRequests.delete(message.request_id);
 	}
 
-	function handleRefreshIndex(ws: Bun.ServerWebSocket<WsConnectionState>, _message: WsClientMessage) {
+	function handleRefreshIndex(ws: Bun.ServerWebSocket<WsSessionState>, _message: WsClientMessage) {
 		const stats = app.indexer
 			? app.indexer.refreshIndex()
 			: { indexed: 0, skippedUnchanged: 0, parseErrors: 0 };
@@ -83,7 +83,7 @@ export function createWsHandlers(app: App) {
 		});
 	}
 
-	function handlePing(ws: Bun.ServerWebSocket<WsConnectionState>, _message: WsClientMessage) {
+	function handlePing(ws: Bun.ServerWebSocket<WsSessionState>, _message: WsClientMessage) {
 		wsSend(ws, {
 			type: "pong",
 			server_time: nowMs(),
@@ -100,7 +100,7 @@ export function createWsHandlers(app: App) {
 	};
 
 	return {
-		open(ws: Bun.ServerWebSocket<WsConnectionState>) {
+		open(ws: Bun.ServerWebSocket<WsSessionState>) {
 			log.ws(`connected connection_id=${ws.data.connectionId}`);
 			wsSend(ws, {
 				type: "hello",
@@ -109,7 +109,7 @@ export function createWsHandlers(app: App) {
 			});
 		},
 
-		async message(ws: Bun.ServerWebSocket<WsConnectionState>, rawMessage: string | Buffer) {
+		async message(ws: Bun.ServerWebSocket<WsSessionState>, rawMessage: string | Buffer) {
 			const text =
 				typeof rawMessage === "string"
 					? rawMessage
@@ -144,7 +144,7 @@ export function createWsHandlers(app: App) {
 			}
 		},
 
-		close(ws: Bun.ServerWebSocket<WsConnectionState>) {
+		close(ws: Bun.ServerWebSocket<WsSessionState>) {
 			for (const requestId of ws.data.activeRequests) {
 				app.claudeService.stopRequest(requestId);
 			}

@@ -4,10 +4,12 @@ import { loadConfig, type ManagerConfig } from "./config";
 import { ClaudeJsonlIndexer } from "./jsonl-indexer";
 import { jsonResponse, notFound } from "./http-utils";
 import { ManagerRepository } from "./repository";
-import type { SessionHistoryResult, WsConnectionState } from "./types";
+import type { SessionHistoryResult, WsConnectionState, WsSessionState, WsTerminalState } from "./types";
 import { log } from "./logger";
 import { App } from "./app";
 import { createWsHandlers } from "./handlers/ws-handlers";
+import { TerminalService, type TerminalServiceLike } from "./terminal-service";
+import { shellEscape } from "./utils";
 
 // ── Exported interfaces for test usage ──────────────────────────
 
@@ -29,6 +31,7 @@ export interface ServerDeps {
 	repository: ManagerRepository;
 	claudeService: ClaudeServiceLike;
 	indexer?: IndexerLike;
+	terminalService?: TerminalServiceLike;
 }
 
 export interface ServerHandle {
@@ -39,16 +42,38 @@ export interface ServerHandle {
 // ── Server factory ──────────────────────────────────────────────
 
 export function createServer(deps: ServerDeps): ServerHandle {
-	const { config, repository, claudeService, indexer } = deps;
+	const { config, repository, claudeService, indexer, terminalService } = deps;
 
 	const app = new App({ repository, claudeService, config, indexer });
-	const websocket = createWsHandlers(app);
+	const sessionWsHandlers = createWsHandlers(app);
 
 	const server = Bun.serve<WsConnectionState>({
 		hostname: config.host,
 		port: config.port,
 		idleTimeout: 120,
-		websocket,
+		websocket: {
+			open(ws) {
+				if (ws.data.kind === "terminal") {
+					handleTerminalOpen(ws as Bun.ServerWebSocket<WsTerminalState>);
+				} else {
+					sessionWsHandlers.open(ws as Bun.ServerWebSocket<WsSessionState>);
+				}
+			},
+			message(ws, rawMessage) {
+				if (ws.data.kind === "terminal") {
+					handleTerminalMessage(ws as Bun.ServerWebSocket<WsTerminalState>, rawMessage);
+				} else {
+					sessionWsHandlers.message(ws as Bun.ServerWebSocket<WsSessionState>, rawMessage);
+				}
+			},
+			close(ws) {
+				if (ws.data.kind === "terminal") {
+					handleTerminalClose(ws as Bun.ServerWebSocket<WsTerminalState>);
+				} else {
+					sessionWsHandlers.close(ws as Bun.ServerWebSocket<WsSessionState>);
+				}
+			},
+		},
 		async fetch(req, serverInstance) {
 			const url = new URL(req.url);
 			const { pathname } = url;
@@ -56,9 +81,10 @@ export function createServer(deps: ServerDeps): ServerHandle {
 			if (pathname === "/v1/ws") {
 				const upgraded = serverInstance.upgrade(req, {
 					data: {
+						kind: "session",
 						connectionId: crypto.randomUUID(),
 						activeRequests: new Set<string>(),
-					},
+					} satisfies WsSessionState,
 				});
 				if (upgraded) return;
 				return jsonResponse(400, {
@@ -67,6 +93,10 @@ export function createServer(deps: ServerDeps): ServerHandle {
 						message: "WebSocket upgrade failed",
 					},
 				});
+			}
+
+			if (pathname === "/v1/terminal") {
+				return handleTerminalUpgrade(req, url, serverInstance);
 			}
 
 			if (pathname === "/health") {
@@ -105,6 +135,140 @@ export function createServer(deps: ServerDeps): ServerHandle {
 		},
 	});
 
+	// ── Terminal WebSocket handlers ──────────────────────────────
+
+	function handleTerminalUpgrade(
+		req: Request,
+		url: URL,
+		serverInstance: ReturnType<typeof Bun.serve>,
+	): Response | undefined {
+		const sessionId = url.searchParams.get("session_id");
+		const encodedCwd = url.searchParams.get("encoded_cwd");
+		const sshDestination = url.searchParams.get("ssh_destination");
+		const cols = Number.parseInt(url.searchParams.get("cols") ?? "80", 10);
+		const rows = Number.parseInt(url.searchParams.get("rows") ?? "24", 10);
+
+		if (!sessionId || !encodedCwd) {
+			return jsonResponse(400, {
+				error: {
+					code: "invalid_params",
+					message: "session_id and encoded_cwd are required",
+				},
+			});
+		}
+
+		if (!sshDestination) {
+			return jsonResponse(400, {
+				error: {
+					code: "invalid_params",
+					message: "ssh_destination is required",
+				},
+			});
+		}
+
+		const metadata = repository.getSessionMetadata(sessionId, encodedCwd);
+		if (!metadata) {
+			return jsonResponse(404, {
+				error: {
+					code: "session_not_found",
+					message: "Session not found",
+				},
+			});
+		}
+
+		const upgraded = serverInstance.upgrade(req, {
+			data: {
+				kind: "terminal",
+				connectionId: crypto.randomUUID(),
+				terminal: null,
+				sessionId,
+				encodedCwd,
+				cwd: metadata.cwd,
+				sshDestination,
+				cols: Number.isNaN(cols) ? 80 : cols,
+				rows: Number.isNaN(rows) ? 24 : rows,
+			} satisfies WsTerminalState,
+		});
+
+		if (upgraded) return;
+		return jsonResponse(400, {
+			error: {
+				code: "upgrade_failed",
+				message: "WebSocket upgrade failed",
+			},
+		});
+	}
+
+	function handleTerminalOpen(ws: Bun.ServerWebSocket<WsTerminalState>) {
+		const { connectionId, sessionId, cwd, sshDestination, cols, rows } = ws.data;
+		log.terminal(`connected connection_id=${connectionId} session_id=${sessionId}`);
+
+		if (!terminalService) {
+			ws.send("\r\n[Terminal not available]\r\n");
+			ws.close(1008, "Terminal service not available");
+			return;
+		}
+
+		const remoteCommand = `cd ${shellEscape(cwd)} && claude -r ${shellEscape(sessionId)}`;
+
+		const terminal = terminalService.open({
+			sshDestination,
+			remoteCommand,
+			cols,
+			rows,
+			onData(data) {
+				try {
+					ws.send(data);
+				} catch {
+					// WS already closed
+				}
+			},
+			onExit(code) {
+				log.terminal(`pty exited connection_id=${connectionId} code=${code}`);
+				try {
+					ws.close(1000, "Process exited");
+				} catch {
+					// WS already closed
+				}
+			},
+		});
+
+		ws.data.terminal = terminal;
+	}
+
+	function handleTerminalMessage(ws: Bun.ServerWebSocket<WsTerminalState>, rawMessage: string | Buffer) {
+		const terminal = ws.data.terminal;
+		if (!terminal) return;
+
+		if (typeof rawMessage === "string") {
+			// Check if this is a JSON control message (resize)
+			if (rawMessage.startsWith("{")) {
+				try {
+					const parsed = JSON.parse(rawMessage);
+					if (parsed && typeof parsed === "object" && parsed.type === "resize") {
+						const cols = Number(parsed.cols);
+						const rows = Number(parsed.rows);
+						if (cols > 0 && rows > 0) {
+							terminal.resize(cols, rows);
+							return;
+						}
+					}
+				} catch {
+					// Not JSON, treat as raw input
+				}
+			}
+			terminal.write(Buffer.from(rawMessage));
+		} else {
+			terminal.write(Buffer.from(rawMessage));
+		}
+	}
+
+	function handleTerminalClose(ws: Bun.ServerWebSocket<WsTerminalState>) {
+		log.terminal(`disconnected connection_id=${ws.data.connectionId}`);
+		ws.data.terminal?.close();
+		ws.data.terminal = null;
+	}
+
 	function stop() {
 		server.stop(true);
 		repository.close();
@@ -125,12 +289,14 @@ if (import.meta.main) {
 	);
 	const claudeService = new ClaudeService();
 
+	const terminalService = new TerminalService();
+
 	const initialStats = indexer.refreshIndex();
 	log.index(
 		`startup indexed=${initialStats.indexed} skipped=${initialStats.skippedUnchanged} errors=${initialStats.parseErrors}`,
 	);
 
-	const handle = createServer({ config, repository, claudeService, indexer });
+	const handle = createServer({ config, repository, claudeService, indexer, terminalService });
 
 	const indexInterval = setInterval(() => {
 		const stats = indexer.refreshIndex();

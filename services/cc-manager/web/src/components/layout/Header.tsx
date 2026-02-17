@@ -1,4 +1,4 @@
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { WsStatus } from "@/hooks/use-websocket";
 
@@ -14,6 +14,7 @@ interface HeaderProps {
   totalCostUsd?: number;
   onBack: () => void;
   onDisconnect: () => void;
+  onSettings?: () => void;
 }
 
 export function Header({
@@ -23,6 +24,7 @@ export function Header({
   totalCostUsd,
   onBack,
   onDisconnect,
+  onSettings,
 }: HeaderProps) {
   const statusText =
     status === "connected"
@@ -54,6 +56,17 @@ export function Header({
           )}
         </div>
       </div>
+      {onSettings && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0 rounded-full"
+          onClick={onSettings}
+          title="Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
+      )}
       {status === "connected" && (
         <Button variant="secondary" size="sm" onClick={onDisconnect}>
           Disconnect
