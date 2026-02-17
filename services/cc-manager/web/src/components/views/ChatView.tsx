@@ -5,6 +5,31 @@ import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { ChatInput } from "@/components/chat/ChatInput";
 import type { ChatMessage } from "@/types/chat";
 
+interface Turn {
+  userMessage: ChatMessage | null;
+  assistantMessages: ChatMessage[];
+}
+
+function groupIntoTurns(messages: ChatMessage[]): Turn[] {
+  const turns: Turn[] = [];
+  let current: Turn | null = null;
+
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      current = { userMessage: msg, assistantMessages: [] };
+      turns.push(current);
+    } else {
+      if (!current) {
+        current = { userMessage: null, assistantMessages: [] };
+        turns.push(current);
+      }
+      current.assistantMessages.push(msg);
+    }
+  }
+
+  return turns;
+}
+
 interface ChatViewProps {
   messages: ChatMessage[];
   activeRequestIds: Set<string>;
@@ -36,25 +61,35 @@ export function ChatView({
         className="flex-1 p-4 flex flex-col gap-2.5"
       >
         <div className="flex flex-col gap-2.5">
-          {messages.map((msg, i) => {
-            const isActive =
-              msg.requestId !== null && activeRequestIds.has(msg.requestId);
-            const showTyping =
-              msg.role === "assistant" && msg.contentBlocks.length === 0 && isActive;
-
-            if (showTyping) {
-              return <TypingIndicator key={i} />;
-            }
-
-            if (msg.contentBlocks.length === 0 && !isActive) return null;
+          {groupIntoTurns(messages).map((turn, i) => {
+            const mergedBlocks = turn.assistantMessages.flatMap(
+              (m) => m.contentBlocks
+            );
+            const isActive = turn.assistantMessages.some(
+              (m) => m.requestId !== null && activeRequestIds.has(m.requestId)
+            );
+            const showTyping = mergedBlocks.length === 0 && isActive;
 
             return (
-              <MessageBubble
-                key={i}
-                role={msg.role}
-                contentBlocks={msg.contentBlocks}
-                isStreaming={isActive}
-              />
+              <div key={i} className="flex flex-col gap-2.5">
+                {turn.userMessage &&
+                  turn.userMessage.contentBlocks.length > 0 && (
+                    <MessageBubble
+                      role="user"
+                      contentBlocks={turn.userMessage.contentBlocks}
+                      isStreaming={false}
+                    />
+                  )}
+                {showTyping ? (
+                  <TypingIndicator />
+                ) : mergedBlocks.length > 0 ? (
+                  <MessageBubble
+                    role="assistant"
+                    contentBlocks={mergedBlocks}
+                    isStreaming={isActive}
+                  />
+                ) : null}
+              </div>
             );
           })}
         </div>
