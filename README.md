@@ -1,4 +1,4 @@
-# cc-sdk-test
+# terminal7
 
 This repository now contains a production-oriented **Claude Code manager backend** and a matching iOS chat client flow.
 
