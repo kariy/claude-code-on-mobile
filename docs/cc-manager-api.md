@@ -48,13 +48,41 @@ List all known sessions, ordered by most recent activity first.
       "last_activity_at": 1705300100000,
       "source": "db",               // "db" | "jsonl" | "merged"
       "message_count": 12,
-      "total_cost_usd": 0.42        // cumulative cost across all prompts
+      "total_cost_usd": 0.42,       // cumulative cost across all prompts
+      "repo_id": "uuid-1",          // optional — git repository ID
+      "worktree_path": "/path/to/worktree", // optional — session worktree
+      "branch": "main"              // optional — git branch
     }
   ]
 }
 ```
 
 Sessions are sorted by `last_activity_at DESC`. The `message_count` comes from the JSONL file index and is `0` if the session has not been indexed.
+
+---
+
+### `GET /v1/repos`
+
+List all known git repositories (bare clones managed by the server).
+
+**Response `200`**
+
+```jsonc
+{
+  "repositories": [
+    {
+      "id": "uuid-1",
+      "url": "https://github.com/user/repo.git",
+      "slug": "github-com-user-repo",
+      "default_branch": "main",
+      "created_at": 1705300000000,    // epoch ms
+      "last_fetched_at": 1705300100000
+    }
+  ]
+}
+```
+
+Repositories are sorted by `last_fetched_at DESC`.
 
 ---
 
@@ -315,6 +343,8 @@ Sent for any error condition (validation failures, prompt errors, etc.).
 | `invalid_payload`  | `session_id` missing on `session.resume`/`session.send` |
 | `session_not_found`| Session metadata not found in the database     |
 | `prompt_failed`    | Claude SDK streaming error                     |
+| `repo_not_found`   | Repository ID not found in database            |
+| `git_error`        | Git operation failed (clone, worktree, etc.)   |
 
 #### `pong`
 
@@ -343,9 +373,19 @@ Create a new session and send the first prompt.
   "prompt": "Fix the login bug",     // required, min 1 char
   "request_id": "req-1",             // optional (min 1 char), auto-generated UUID if omitted
   "cwd": "/Users/me/project",        // optional (min 1 char), defaults to CC_MANAGER_DEFAULT_CWD (default "/")
-  "title": "Fix login"               // optional, 1–256 chars; used as session title hint
+  "title": "Fix login",              // optional, 1–256 chars; used as session title hint
+  "repo_url": "https://github.com/user/repo.git", // optional — clone or reuse a git repo
+  "repo_id": "uuid-1",              // optional — use an existing repository by ID
+  "branch": "feature-branch"        // optional — branch to check out (defaults to repo default)
 }
 ```
+
+When `repo_url` or `repo_id` is provided and a `gitService` is configured, the server:
+1. Clones the repo (or fetches if already cloned) as a bare repository under `<projectsDir>/repos/`
+2. Creates a new git worktree under `<projectsDir>/worktrees/<uuid>/`
+3. Uses the worktree path as `cwd` for the session
+
+If neither `repo_url` nor `repo_id` is provided, the session uses `cwd` or the default working directory as before.
 
 **Preconditions:** None.
 
@@ -458,6 +498,34 @@ Keepalive ping.
 
 **Response:** `pong` with current `server_time`.
 
+#### `repo.list`
+
+Request the list of known git repositories.
+
+```jsonc
+{
+  "type": "repo.list"
+}
+```
+
+**Response:** `repo.list` server message with the repository list:
+
+```jsonc
+{
+  "type": "repo.list",
+  "repositories": [
+    {
+      "id": "uuid-1",
+      "url": "https://github.com/user/repo.git",
+      "slug": "github-com-user-repo",
+      "default_branch": "main",
+      "created_at": 1705300000000,
+      "last_fetched_at": 1705300100000
+    }
+  ]
+}
+```
+
 ---
 
 ### Connection lifecycle
@@ -558,6 +626,7 @@ All configuration is via environment variables prefixed `CC_MANAGER_`.
 | `CC_MANAGER_ALLOWED_TOOLS`        | `Read,Glob,Grep,Bash`   | Comma-separated SDK tool allowlist |
 | `CC_MANAGER_MAX_HISTORY_MESSAGES` | `5000`                  | Max messages returned by history   |
 | `CC_MANAGER_DEFAULT_CWD`          | `/`                     | Default working directory for new sessions |
+| `CC_MANAGER_PROJECTS_DIR`         | `~/.cc-manager/projects`| Git bare clones and worktrees directory    |
 
 Paths starting with `~/` are expanded to the user's home directory.
 
@@ -580,6 +649,21 @@ Session identity is a composite key of `(session_id, encoded_cwd)`. The `encoded
 | `last_activity_at`| INTEGER | Last activity timestamp (epoch ms)   |
 | `source`          | TEXT    | `"db"`, `"jsonl"`, or `"merged"`     |
 | `total_cost_usd`  | REAL    | Cumulative cost in USD (default 0)   |
+| `repo_id`         | TEXT    | Optional foreign key to `repositories.id` |
+| `worktree_path`   | TEXT    | Optional absolute path to git worktree    |
+| `branch`          | TEXT    | Optional git branch name                  |
+
+### `repositories`
+
+| Column            | Type    | Description                          |
+| ----------------- | ------- | ------------------------------------ |
+| `id`              | TEXT PK | Repository identifier (UUID)         |
+| `url`             | TEXT    | Remote URL (unique)                  |
+| `slug`            | TEXT    | URL-derived slug                     |
+| `bare_repo_path`  | TEXT    | Absolute path to bare clone          |
+| `default_branch`  | TEXT    | Default branch name                  |
+| `created_at`      | INTEGER | Creation timestamp (epoch ms)        |
+| `last_fetched_at` | INTEGER | Last fetch timestamp (epoch ms)      |
 
 ### `session_events`
 

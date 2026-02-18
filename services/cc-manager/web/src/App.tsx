@@ -8,6 +8,7 @@ import { fetchSessions, fetchHistory } from "@/lib/api";
 import { getSshDestination, setSshDestination, getSshPassword, setSshPassword } from "@/lib/settings";
 import { Header } from "@/components/layout/Header";
 import { SshDestinationDialog } from "@/components/SshDestinationDialog";
+import { RepoSelectionDialog, type RepoSelection } from "@/components/RepoSelectionDialog";
 import { ConnectingView } from "@/components/views/ConnectingView";
 import { SessionsView } from "@/components/views/SessionsView";
 import { ChatView } from "@/components/views/ChatView";
@@ -453,6 +454,8 @@ export default function App() {
   const hasConnectedRef = useRef(false);
   const terminal = useTerminal();
   const [showSshDialog, setShowSshDialog] = useState(false);
+  const [showRepoDialog, setShowRepoDialog] = useState(false);
+  const [pendingRepoSelection, setPendingRepoSelection] = useState<RepoSelection | null>(null);
   const [pendingTerminalSession, setPendingTerminalSession] = useState<{
     sessionId: string;
     encodedCwd: string;
@@ -594,6 +597,10 @@ export default function App() {
 
       case "pong":
         break;
+
+      case "repo.list":
+        // Handled by RepoSelectionDialog directly via REST
+        break;
     }
   }, []);
 
@@ -688,7 +695,17 @@ export default function App() {
   );
 
   const handleNewSession = useCallback(() => {
+    setShowRepoDialog(true);
+  }, []);
+
+  const handleRepoSelect = useCallback((selection: RepoSelection | null) => {
+    setPendingRepoSelection(selection);
+    setShowRepoDialog(false);
     dispatch({ type: "START_NEW_SESSION" });
+  }, []);
+
+  const handleRepoCancel = useCallback(() => {
+    setShowRepoDialog(false);
   }, []);
 
   const handleReturnToSessions = useCallback(() => {
@@ -718,14 +735,21 @@ export default function App() {
           prompt: text,
         });
       } else {
-        send({
+        const createMsg: Record<string, unknown> = {
           type: "session.create",
           request_id: requestId,
           prompt: text,
-        });
+        };
+        if (pendingRepoSelection) {
+          if (pendingRepoSelection.repoUrl) createMsg.repo_url = pendingRepoSelection.repoUrl;
+          if (pendingRepoSelection.repoId) createMsg.repo_id = pendingRepoSelection.repoId;
+          if (pendingRepoSelection.branch) createMsg.branch = pendingRepoSelection.branch;
+          setPendingRepoSelection(null);
+        }
+        send(createMsg);
       }
     },
-    [status, send],
+    [status, send, pendingRepoSelection],
   );
 
   const handleOpenTerminal = useCallback(
@@ -854,6 +878,12 @@ export default function App() {
         <SshDestinationDialog
           onSave={handleSshDialogSave}
           onCancel={handleSshDialogCancel}
+        />
+      )}
+      {showRepoDialog && (
+        <RepoSelectionDialog
+          onSelect={handleRepoSelect}
+          onCancel={handleRepoCancel}
         />
       )}
     </div>

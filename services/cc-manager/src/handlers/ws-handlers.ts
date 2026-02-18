@@ -1,22 +1,106 @@
 import type { App } from "../app";
+import { repoUrlToSlug } from "../git-service";
 import { WsClientMessageSchema, type WsClientMessage } from "../schemas";
 import type { WsSessionState } from "../types";
 import { encodeCwd, nowMs } from "../utils";
-import { formatWsLogPayload, parseJsonText, wsError, wsSend } from "../ws-utils";
+import {
+	formatWsLogPayload,
+	parseJsonText,
+	wsError,
+	wsSend,
+} from "../ws-utils";
 import { log } from "../logger";
 import { createPromptHandler } from "./prompt-handler";
 
 export function createWsHandlers(app: App) {
 	const handlePromptMessage = createPromptHandler(app);
 
-	type WsHandler = (ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) => void;
+	type WsHandler = (
+		ws: Bun.ServerWebSocket<WsSessionState>,
+		message: WsClientMessage,
+	) => void;
 
-	function handleSessionCreate(ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) {
+	async function handleSessionCreate(
+		ws: Bun.ServerWebSocket<WsSessionState>,
+		message: WsClientMessage,
+	) {
 		if (message.type !== "session.create") return;
 		log.ws("Session created.");
 
 		const requestId = message.request_id ?? crypto.randomUUID();
-		const cwd = message.cwd ?? app.config.defaultCwd;
+		let cwd = message.cwd ?? app.config.defaultCwd;
+		let repoId: string | undefined;
+		let worktreePath: string | undefined;
+		let branch: string | undefined;
+
+		// Git worktree setup
+		if ((message.repo_url || message.repo_id) && app.gitService) {
+			try {
+				let repo = message.repo_id
+					? app.repository.getRepositoryById(message.repo_id)
+					: message.repo_url
+						? app.repository.getRepositoryByUrl(message.repo_url)
+						: null;
+
+				if (!repo && message.repo_url) {
+					const repoInfo = await app.gitService.ensureRepo(
+						message.repo_url,
+						app.config.projectsDir,
+					);
+					const slug = repoUrlToSlug(message.repo_url);
+					repo = app.repository.insertRepository({
+						id: crypto.randomUUID(),
+						url: message.repo_url,
+						slug,
+						bareRepoPath: repoInfo.bareRepoPath,
+						defaultBranch: repoInfo.defaultBranch,
+					});
+				} else if (repo && message.repo_url) {
+					// Existing repo by URL — fetch latest
+					const repoInfo = await app.gitService.ensureRepo(
+						message.repo_url,
+						app.config.projectsDir,
+					);
+					app.repository.updateRepositoryFetched(
+						repo.id,
+						repoInfo.defaultBranch,
+					);
+				}
+
+				if (!repo) {
+					wsError(
+						ws,
+						"Repository not found",
+						"repo_not_found",
+						requestId,
+					);
+					return;
+				}
+
+				repoId = repo.id;
+				const worktreeId = crypto.randomUUID();
+				const worktreeResult = await app.gitService.createWorktree(
+					repo.bareRepoPath,
+					{
+						branch: message.branch,
+						worktreeId,
+						projectsDir: app.config.projectsDir,
+					},
+				);
+				worktreePath = worktreeResult.worktreePath;
+				branch = worktreeResult.branch;
+				cwd = worktreePath;
+			} catch (err) {
+				wsError(
+					ws,
+					`Git setup failed: ${err instanceof Error ? err.message : String(err)}`,
+					"git_error",
+					requestId,
+				);
+				return;
+			}
+		}
+
 		const encodedCwd = encodeCwd(cwd);
 
 		void handlePromptMessage(ws, {
@@ -25,14 +109,29 @@ export function createWsHandlers(app: App) {
 			cwd,
 			encodedCwd,
 			titleHint: message.title,
+			repoId,
+			worktreePath,
+			branch,
 		});
 	}
 
-	function handleSessionResumeOrSend(ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) {
-		if (message.type !== "session.resume" && message.type !== "session.send") return;
+	function handleSessionResumeOrSend(
+		ws: Bun.ServerWebSocket<WsSessionState>,
+		message: WsClientMessage,
+	) {
+		if (
+			message.type !== "session.resume" &&
+			message.type !== "session.send"
+		)
+			return;
 
 		if (!message.session_id) {
-			wsError(ws, "session_id is required", "invalid_payload", message.request_id);
+			wsError(
+				ws,
+				"session_id is required",
+				"invalid_payload",
+				message.request_id,
+			);
 			return;
 		}
 
@@ -44,7 +143,12 @@ export function createWsHandlers(app: App) {
 		);
 
 		if (!metadata) {
-			wsError(ws, "Session not found", "session_not_found", message.request_id);
+			wsError(
+				ws,
+				"Session not found",
+				"session_not_found",
+				message.request_id,
+			);
 			return;
 		}
 
@@ -60,7 +164,10 @@ export function createWsHandlers(app: App) {
 		});
 	}
 
-	function handleSessionStop(ws: Bun.ServerWebSocket<WsSessionState>, message: WsClientMessage) {
+	function handleSessionStop(
+		ws: Bun.ServerWebSocket<WsSessionState>,
+		message: WsClientMessage,
+	) {
 		if (message.type !== "session.stop") return;
 
 		const stopped = app.claudeService.stopRequest(message.request_id);
@@ -72,7 +179,10 @@ export function createWsHandlers(app: App) {
 		ws.data.activeRequests.delete(message.request_id);
 	}
 
-	function handleRefreshIndex(ws: Bun.ServerWebSocket<WsSessionState>, _message: WsClientMessage) {
+	function handleRefreshIndex(
+		ws: Bun.ServerWebSocket<WsSessionState>,
+		_message: WsClientMessage,
+	) {
 		const stats = app.indexer
 			? app.indexer.refreshIndex()
 			: { indexed: 0, skippedUnchanged: 0, parseErrors: 0 };
@@ -83,10 +193,31 @@ export function createWsHandlers(app: App) {
 		});
 	}
 
-	function handlePing(ws: Bun.ServerWebSocket<WsSessionState>, _message: WsClientMessage) {
+	function handlePing(
+		ws: Bun.ServerWebSocket<WsSessionState>,
+		_message: WsClientMessage,
+	) {
 		wsSend(ws, {
 			type: "pong",
 			server_time: nowMs(),
+		});
+	}
+
+	function handleRepoList(
+		ws: Bun.ServerWebSocket<WsSessionState>,
+		_message: WsClientMessage,
+	) {
+		const repos = app.repository.listRepositories();
+		wsSend(ws, {
+			type: "repo.list",
+			repositories: repos.map((r) => ({
+				id: r.id,
+				url: r.url,
+				slug: r.slug,
+				default_branch: r.defaultBranch,
+				created_at: r.createdAt,
+				last_fetched_at: r.lastFetchedAt,
+			})),
 		});
 	}
 
@@ -96,7 +227,8 @@ export function createWsHandlers(app: App) {
 		"session.send": handleSessionResumeOrSend,
 		"session.stop": handleSessionStop,
 		"session.refresh_index": handleRefreshIndex,
-		"ping": handlePing,
+		ping: handlePing,
+		"repo.list": handleRepoList,
 	};
 
 	return {
@@ -109,7 +241,10 @@ export function createWsHandlers(app: App) {
 			});
 		},
 
-		async message(ws: Bun.ServerWebSocket<WsSessionState>, rawMessage: string | Buffer) {
+		async message(
+			ws: Bun.ServerWebSocket<WsSessionState>,
+			rawMessage: string | Buffer,
+		) {
 			const text =
 				typeof rawMessage === "string"
 					? rawMessage

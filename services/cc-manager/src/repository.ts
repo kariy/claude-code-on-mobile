@@ -3,6 +3,7 @@ import { mkdirSync } from "fs";
 import { dirname } from "path";
 import type {
 	JsonlIndexUpdate,
+	RepositoryInfo,
 	SessionMetadata,
 	SessionSummary,
 } from "./types";
@@ -18,6 +19,19 @@ interface SessionMetadataRow {
 	last_activity_at: number;
 	source: "db" | "jsonl" | "merged";
 	total_cost_usd: number;
+	repo_id: string | null;
+	worktree_path: string | null;
+	branch: string | null;
+}
+
+interface RepositoryRow {
+	id: string;
+	url: string;
+	slug: string;
+	bare_repo_path: string;
+	default_branch: string;
+	created_at: number;
+	last_fetched_at: number;
 }
 
 interface SessionSummaryRow extends SessionMetadataRow {
@@ -139,6 +153,54 @@ export class ManagerRepository {
 					.run(nowMs());
 			})();
 		}
+
+		// V3: Add repositories table + repo columns on session_metadata
+		const hasV3 = this.db
+			.query("SELECT 1 FROM schema_migrations WHERE version = 3")
+			.get() as { "1": number } | null;
+		if (!hasV3) {
+			this.db.transaction(() => {
+				this.db.exec(`
+					CREATE TABLE IF NOT EXISTS repositories (
+						id TEXT PRIMARY KEY,
+						url TEXT NOT NULL UNIQUE,
+						slug TEXT NOT NULL,
+						bare_repo_path TEXT NOT NULL,
+						default_branch TEXT NOT NULL DEFAULT 'main',
+						created_at INTEGER NOT NULL,
+						last_fetched_at INTEGER NOT NULL
+					);
+				`);
+				this.db.exec(
+					"CREATE INDEX IF NOT EXISTS idx_repositories_url ON repositories(url);",
+				);
+
+				const cols = this.db
+					.query("PRAGMA table_info(session_metadata)")
+					.all() as { name: string }[];
+				if (!cols.some((c) => c.name === "repo_id")) {
+					this.db.exec(
+						"ALTER TABLE session_metadata ADD COLUMN repo_id TEXT;",
+					);
+				}
+				if (!cols.some((c) => c.name === "worktree_path")) {
+					this.db.exec(
+						"ALTER TABLE session_metadata ADD COLUMN worktree_path TEXT;",
+					);
+				}
+				if (!cols.some((c) => c.name === "branch")) {
+					this.db.exec(
+						"ALTER TABLE session_metadata ADD COLUMN branch TEXT;",
+					);
+				}
+
+				this.db
+					.query(
+						"INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?)",
+					)
+					.run(nowMs());
+			})();
+		}
 	}
 
 	private getMetadataRow(
@@ -160,6 +222,9 @@ export class ManagerRepository {
 		lastActivityAt?: number;
 		source: "db" | "jsonl";
 		costToAdd?: number;
+		repoId?: string;
+		worktreePath?: string;
+		branch?: string;
 	}): SessionMetadata {
 		const ts = nowMs();
 		const activity = params.lastActivityAt ?? ts;
@@ -175,12 +240,15 @@ export class ManagerRepository {
 		const createdAt = existing?.created_at ?? ts;
 		const totalCostUsd =
 			(existing?.total_cost_usd ?? 0) + (params.costToAdd ?? 0);
+		const repoId = params.repoId ?? existing?.repo_id ?? undefined;
+		const worktreePath = params.worktreePath ?? existing?.worktree_path ?? undefined;
+		const branch = params.branch ?? existing?.branch ?? undefined;
 
 		this.db
 			.query(
 				`INSERT OR REPLACE INTO session_metadata (
-					session_id, encoded_cwd, cwd, title, created_at, updated_at, last_activity_at, source, total_cost_usd
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					session_id, encoded_cwd, cwd, title, created_at, updated_at, last_activity_at, source, total_cost_usd, repo_id, worktree_path, branch
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				params.sessionId,
@@ -192,6 +260,9 @@ export class ManagerRepository {
 				activity,
 				source,
 				totalCostUsd,
+				repoId ?? null,
+				worktreePath ?? null,
+				branch ?? null,
 			);
 
 		return {
@@ -204,6 +275,9 @@ export class ManagerRepository {
 			lastActivityAt: activity,
 			source,
 			totalCostUsd,
+			repoId,
+			worktreePath,
+			branch,
 		};
 	}
 
@@ -249,6 +323,9 @@ export class ManagerRepository {
 					sm.last_activity_at,
 					sm.source,
 					sm.total_cost_usd,
+					sm.repo_id,
+					sm.worktree_path,
+					sm.branch,
 					COALESCE(fi.message_count, 0) AS message_count
 				FROM session_metadata sm
 				LEFT JOIN session_file_index fi
@@ -268,6 +345,9 @@ export class ManagerRepository {
 			source: row.source,
 			totalCostUsd: row.total_cost_usd,
 			messageCount: row.message_count,
+			repoId: row.repo_id ?? undefined,
+			worktreePath: row.worktree_path ?? undefined,
+			branch: row.branch ?? undefined,
 		}));
 	}
 
@@ -287,6 +367,9 @@ export class ManagerRepository {
 			lastActivityAt: row.last_activity_at,
 			source: row.source,
 			totalCostUsd: row.total_cost_usd,
+			repoId: row.repo_id ?? undefined,
+			worktreePath: row.worktree_path ?? undefined,
+			branch: row.branch ?? undefined,
 		};
 	}
 
@@ -303,6 +386,9 @@ export class ManagerRepository {
 					sm.last_activity_at,
 					sm.source,
 					sm.total_cost_usd,
+					sm.repo_id,
+					sm.worktree_path,
+					sm.branch,
 					COALESCE(fi.message_count, 0) AS message_count
 				FROM session_metadata sm
 				LEFT JOIN session_file_index fi
@@ -323,6 +409,9 @@ export class ManagerRepository {
 			source: row.source,
 			totalCostUsd: row.total_cost_usd,
 			messageCount: row.message_count,
+			repoId: row.repo_id ?? undefined,
+			worktreePath: row.worktree_path ?? undefined,
+			branch: row.branch ?? undefined,
 		}));
 	}
 
@@ -345,6 +434,85 @@ export class ManagerRepository {
 				params.payload ? JSON.stringify(params.payload) : null,
 				nowMs(),
 			);
+	}
+
+	// ── Repository methods ──────────────────────────────────────────
+
+	insertRepository(params: {
+		id: string;
+		url: string;
+		slug: string;
+		bareRepoPath: string;
+		defaultBranch: string;
+	}): RepositoryInfo {
+		const ts = nowMs();
+		this.db
+			.query(
+				`INSERT OR REPLACE INTO repositories (
+					id, url, slug, bare_repo_path, default_branch, created_at, last_fetched_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				params.id,
+				params.url,
+				params.slug,
+				params.bareRepoPath,
+				params.defaultBranch,
+				ts,
+				ts,
+			);
+		return {
+			id: params.id,
+			url: params.url,
+			slug: params.slug,
+			bareRepoPath: params.bareRepoPath,
+			defaultBranch: params.defaultBranch,
+			createdAt: ts,
+			lastFetchedAt: ts,
+		};
+	}
+
+	getRepositoryByUrl(url: string): RepositoryInfo | null {
+		const row = this.db
+			.query("SELECT * FROM repositories WHERE url = ?")
+			.get(url) as RepositoryRow | null;
+		if (!row) return null;
+		return this.mapRepositoryRow(row);
+	}
+
+	getRepositoryById(id: string): RepositoryInfo | null {
+		const row = this.db
+			.query("SELECT * FROM repositories WHERE id = ?")
+			.get(id) as RepositoryRow | null;
+		if (!row) return null;
+		return this.mapRepositoryRow(row);
+	}
+
+	listRepositories(): RepositoryInfo[] {
+		const rows = this.db
+			.query("SELECT * FROM repositories ORDER BY last_fetched_at DESC")
+			.all() as RepositoryRow[];
+		return rows.map((row) => this.mapRepositoryRow(row));
+	}
+
+	updateRepositoryFetched(id: string, defaultBranch: string): void {
+		this.db
+			.query(
+				"UPDATE repositories SET last_fetched_at = ?, default_branch = ? WHERE id = ?",
+			)
+			.run(nowMs(), defaultBranch, id);
+	}
+
+	private mapRepositoryRow(row: RepositoryRow): RepositoryInfo {
+		return {
+			id: row.id,
+			url: row.url,
+			slug: row.slug,
+			bareRepoPath: row.bare_repo_path,
+			defaultBranch: row.default_branch,
+			createdAt: row.created_at,
+			lastFetchedAt: row.last_fetched_at,
+		};
 	}
 
 	close(): void {

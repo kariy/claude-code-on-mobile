@@ -9,6 +9,7 @@ export interface ManagerConfig {
 	allowedTools: string[];
 	maxHistoryMessages: number;
 	defaultCwd: string;
+	projectsDir: string;
 }
 
 function parseIntegerEnv(name: string, fallback: number): number {
@@ -46,6 +47,10 @@ export function loadConfig(): ManagerConfig {
 		process.env.CC_MANAGER_CLAUDE_PROJECTS_DIR ?? "~/.claude/projects",
 	);
 
+	const projectsDir = resolvePath(
+		process.env.CC_MANAGER_PROJECTS_DIR ?? "~/.cc-manager/projects",
+	);
+
 	return {
 		host: process.env.CC_MANAGER_HOST ?? "127.0.0.1",
 		port: parseIntegerEnv("CC_MANAGER_PORT", 8787),
@@ -54,5 +59,6 @@ export function loadConfig(): ManagerConfig {
 		allowedTools: parseAllowedTools(),
 		maxHistoryMessages: parseIntegerEnv("CC_MANAGER_MAX_HISTORY_MESSAGES", 5000),
 		defaultCwd: resolvePath(process.env.CC_MANAGER_DEFAULT_CWD ?? "/"),
+		projectsDir,
 	};
 }

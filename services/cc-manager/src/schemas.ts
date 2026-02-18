@@ -6,6 +6,9 @@ export const WsSessionCreateSchema = z.object({
 	prompt: z.string().min(1),
 	cwd: z.string().min(1).optional(),
 	title: z.string().min(1).max(256).optional(),
+	repo_url: z.string().url().optional(),
+	repo_id: z.string().min(1).optional(),
+	branch: z.string().min(1).optional(),
 });
 
 const SessionPromptBaseSchema = z.object({
@@ -37,6 +40,10 @@ export const WsPingSchema = z.object({
 	type: z.literal("ping"),
 });
 
+export const WsRepoListSchema = z.object({
+	type: z.literal("repo.list"),
+});
+
 export const WsClientMessageSchema = z.discriminatedUnion("type", [
 	WsSessionCreateSchema,
 	WsSessionResumeSchema,
@@ -44,6 +51,7 @@ export const WsClientMessageSchema = z.discriminatedUnion("type", [
 	WsSessionStopSchema,
 	WsRefreshIndexSchema,
 	WsPingSchema,
+	WsRepoListSchema,
 ]);
 
 export type WsClientMessage = z.infer<typeof WsClientMessageSchema>;

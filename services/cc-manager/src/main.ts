@@ -2,6 +2,8 @@ import { ClaudeService } from "./claude-service";
 import type { ClaudeServiceLike } from "./claude-service";
 import { loadConfig, type ManagerConfig } from "./config";
 import { ClaudeJsonlIndexer } from "./jsonl-indexer";
+import { GitService } from "./git-service";
+import type { GitServiceLike } from "./git-service";
 import { jsonResponse, notFound } from "./http-utils";
 import { ManagerRepository } from "./repository";
 import type { SessionHistoryResult, WsConnectionState, WsSessionState, WsTerminalState } from "./types";
@@ -32,6 +34,7 @@ export interface ServerDeps {
 	claudeService: ClaudeServiceLike;
 	indexer?: IndexerLike;
 	terminalService?: TerminalServiceLike;
+	gitService?: GitServiceLike;
 }
 
 export interface ServerHandle {
@@ -42,9 +45,9 @@ export interface ServerHandle {
 // ── Server factory ──────────────────────────────────────────────
 
 export function createServer(deps: ServerDeps): ServerHandle {
-	const { config, repository, claudeService, indexer, terminalService } = deps;
+	const { config, repository, claudeService, indexer, terminalService, gitService } = deps;
 
-	const app = new App({ repository, claudeService, config, indexer });
+	const app = new App({ repository, claudeService, config, indexer, gitService });
 	const sessionWsHandlers = createWsHandlers(app);
 
 	const server = Bun.serve<WsConnectionState>({
@@ -108,6 +111,10 @@ export function createServer(deps: ServerDeps): ServerHandle {
 
 			if (pathname === "/v1/sessions" && req.method === "GET") {
 				return app.listSessions(req);
+			}
+
+			if (pathname === "/v1/repos" && req.method === "GET") {
+				return app.listRepositories(req);
 			}
 
 			if (
@@ -291,6 +298,9 @@ export function createServer(deps: ServerDeps): ServerHandle {
 // ── Production startup ──────────────────────────────────────────
 
 if (import.meta.main) {
+	const { mkdirSync } = await import("fs");
+	const { join } = await import("path");
+
 	const config = loadConfig();
 	const repository = new ManagerRepository(config.dbPath);
 	const indexer = new ClaudeJsonlIndexer(
@@ -299,15 +309,19 @@ if (import.meta.main) {
 		config.maxHistoryMessages,
 	);
 	const claudeService = new ClaudeService();
-
 	const terminalService = new TerminalService();
+	const gitService = new GitService();
+
+	// Ensure projects directories exist
+	mkdirSync(join(config.projectsDir, "repos"), { recursive: true });
+	mkdirSync(join(config.projectsDir, "worktrees"), { recursive: true });
 
 	const initialStats = indexer.refreshIndex();
 	log.index(
 		`startup indexed=${initialStats.indexed} skipped=${initialStats.skippedUnchanged} errors=${initialStats.parseErrors}`,
 	);
 
-	const handle = createServer({ config, repository, claudeService, indexer, terminalService });
+	const handle = createServer({ config, repository, claudeService, indexer, terminalService, gitService });
 
 	const indexInterval = setInterval(() => {
 		const stats = indexer.refreshIndex();
@@ -330,5 +344,6 @@ if (import.meta.main) {
 		`cc-manager listening on http://${config.host}:${handle.server.port}`,
 	);
 	log.startup(`claude projects directory: ${config.claudeProjectsDir}`);
+	log.startup(`git projects directory: ${config.projectsDir}`);
 	log.startup(`sqlite database: ${config.dbPath}`);
 }

@@ -1,4 +1,4 @@
-import type { SessionListResponse, SessionHistoryResponse } from "@/types/api";
+import type { SessionListResponse, SessionHistoryResponse, RepositoryListResponse } from "@/types/api";
 
 export async function fetchSessions(
   refresh?: boolean,
@@ -20,5 +20,11 @@ export async function fetchHistory(
     "/v1/sessions/" + encodeURIComponent(sessionId) + "/history" + qs,
   );
   if (!res.ok) throw new Error("Failed to fetch history: " + res.status);
+  return res.json();
+}
+
+export async function fetchRepositories(): Promise<RepositoryListResponse> {
+  const res = await fetch("/v1/repos");
+  if (!res.ok) throw new Error("Failed to fetch repositories: " + res.status);
   return res.json();
 }

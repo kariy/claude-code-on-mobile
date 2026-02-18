@@ -9,6 +9,22 @@ export interface SessionListItem {
   source: string;
   message_count: number;
   total_cost_usd: number;
+  repo_id?: string;
+  worktree_path?: string;
+  branch?: string;
+}
+
+export interface RepositoryListItem {
+  id: string;
+  url: string;
+  slug: string;
+  default_branch: string;
+  created_at: number;
+  last_fetched_at: number;
+}
+
+export interface RepositoryListResponse {
+  repositories: RepositoryListItem[];
 }
 
 export interface SessionListResponse {

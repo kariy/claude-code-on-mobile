@@ -1,3 +1,13 @@
+export interface RepositoryInfo {
+	id: string;
+	url: string;
+	slug: string;
+	bareRepoPath: string;
+	defaultBranch: string;
+	createdAt: number;
+	lastFetchedAt: number;
+}
+
 export interface SessionMetadata {
 	sessionId: string;
 	encodedCwd: string;
@@ -8,6 +18,9 @@ export interface SessionMetadata {
 	lastActivityAt: number;
 	source: "db" | "jsonl" | "merged";
 	totalCostUsd: number;
+	repoId?: string;
+	worktreePath?: string;
+	branch?: string;
 }
 
 export interface SessionSummary extends SessionMetadata {
@@ -51,6 +64,9 @@ export interface WsSessionMeta {
 	last_activity_at: number;
 	source: string;
 	total_cost_usd: number;
+	repo_id?: string;
+	worktree_path?: string;
+	branch?: string;
 }
 
 export function toWsSessionMeta(m: SessionMetadata): WsSessionMeta {
@@ -64,6 +80,9 @@ export function toWsSessionMeta(m: SessionMetadata): WsSessionMeta {
 		last_activity_at: m.lastActivityAt,
 		source: m.source,
 		total_cost_usd: m.totalCostUsd,
+		repo_id: m.repoId,
+		worktree_path: m.worktreePath,
+		branch: m.branch,
 	};
 }
 
@@ -145,6 +164,9 @@ export interface SessionListItem {
 	source: string;
 	message_count: number;
 	total_cost_usd: number;
+	repo_id?: string;
+	worktree_path?: string;
+	branch?: string;
 }
 
 export interface SessionListResponse {
@@ -198,4 +220,7 @@ export interface HandlePromptParams {
 	encodedCwd: string;
 	resumeSessionId?: string;
 	titleHint?: string;
+	repoId?: string;
+	worktreePath?: string;
+	branch?: string;
 }

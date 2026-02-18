@@ -2,6 +2,12 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { ClaudeServiceLike, StreamPromptArgs } from "./claude-service";
+import type {
+	GitServiceLike,
+	RepoInfo,
+	CreateWorktreeOpts,
+	WorktreeResult,
+} from "./git-service";
 import type { TerminalServiceLike, TerminalOpenParams, TerminalHandle } from "./terminal-service";
 import { ManagerRepository } from "./repository";
 import { createServer, type ServerHandle } from "./main";
@@ -89,6 +95,48 @@ export class MockTerminalService implements TerminalServiceLike {
 	}
 }
 
+// ── MockGitService ──────────────────────────────────────────────
+
+export class MockGitService implements GitServiceLike {
+	ensureRepoCalls: string[] = [];
+	worktreeCalls: CreateWorktreeOpts[] = [];
+	removeWorktreeCalls: string[] = [];
+
+	async ensureRepo(url: string, projectsDir: string): Promise<RepoInfo> {
+		this.ensureRepoCalls.push(url);
+		return {
+			bareRepoPath: join(projectsDir, "repos", "mock.git"),
+			defaultBranch: "main",
+		};
+	}
+
+	async createWorktree(
+		_bareRepoPath: string,
+		opts: CreateWorktreeOpts,
+	): Promise<WorktreeResult> {
+		this.worktreeCalls.push(opts);
+		return {
+			worktreePath: join(opts.projectsDir, "worktrees", opts.worktreeId),
+			branch: opts.branch ?? "main",
+		};
+	}
+
+	async removeWorktree(
+		_bareRepoPath: string,
+		worktreePath: string,
+	): Promise<void> {
+		this.removeWorktreeCalls.push(worktreePath);
+	}
+
+	async listBranches(_bareRepoPath: string): Promise<string[]> {
+		return ["main", "develop"];
+	}
+
+	async getDefaultBranch(_bareRepoPath: string): Promise<string> {
+		return "main";
+	}
+}
+
 // ── Test server lifecycle ───────────────────────────────────────
 
 export interface TestContext {
@@ -98,6 +146,7 @@ export interface TestContext {
 	repository: ManagerRepository;
 	claudeService: MockClaudeService;
 	terminalService?: MockTerminalService;
+	gitService?: MockGitService;
 	config: ManagerConfig;
 	tempDir: string;
 }
@@ -105,10 +154,11 @@ export interface TestContext {
 export interface CreateTestServerOptions {
 	configOverrides?: Partial<ManagerConfig>;
 	withTerminalService?: boolean;
+	withGitService?: boolean;
 }
 
 export function createTestServer(overridesOrOpts?: Partial<ManagerConfig> | CreateTestServerOptions): TestContext {
-	const isOpts = overridesOrOpts && ("configOverrides" in overridesOrOpts || "withTerminalService" in overridesOrOpts);
+	const isOpts = overridesOrOpts && ("configOverrides" in overridesOrOpts || "withTerminalService" in overridesOrOpts || "withGitService" in overridesOrOpts);
 	const opts = isOpts ? (overridesOrOpts as CreateTestServerOptions) : undefined;
 	const overrides = isOpts ? opts?.configOverrides : overridesOrOpts as Partial<ManagerConfig> | undefined;
 
@@ -123,14 +173,16 @@ export function createTestServer(overridesOrOpts?: Partial<ManagerConfig> | Crea
 		allowedTools: ["Read", "Glob", "Grep", "Bash"],
 		maxHistoryMessages: 5000,
 		defaultCwd: "/",
+		projectsDir: join(tempDir, "git-projects"),
 		...overrides,
 	};
 
 	const repository = new ManagerRepository(config.dbPath);
 	const claudeService = new MockClaudeService();
 	const terminalService = opts?.withTerminalService ? new MockTerminalService() : undefined;
+	const gitService = opts?.withGitService ? new MockGitService() : undefined;
 
-	const handle = createServer({ config, repository, claudeService, terminalService });
+	const handle = createServer({ config, repository, claudeService, terminalService, gitService });
 	const port = handle.server.port;
 
 	return {
@@ -140,6 +192,7 @@ export function createTestServer(overridesOrOpts?: Partial<ManagerConfig> | Crea
 		repository,
 		claudeService,
 		terminalService,
+		gitService,
 		config,
 		tempDir,
 	};

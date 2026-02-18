@@ -12,6 +12,9 @@ export interface WsSessionMeta {
   last_activity_at: number;
   source: string;
   total_cost_usd: number;
+  repo_id?: string;
+  worktree_path?: string;
+  branch?: string;
 }
 
 export interface WsHelloMessage {
@@ -68,6 +71,20 @@ export interface WsPongMessage {
   server_time: number;
 }
 
+export interface WsRepoListItem {
+  id: string;
+  url: string;
+  slug: string;
+  default_branch: string;
+  created_at: number;
+  last_fetched_at: number;
+}
+
+export interface WsRepoListMessage {
+  type: "repo.list";
+  repositories: WsRepoListItem[];
+}
+
 export type WsServerMessage =
   | WsHelloMessage
   | WsSessionCreatedMessage
@@ -75,7 +92,8 @@ export type WsServerMessage =
   | WsStreamMessageMessage
   | WsStreamDoneMessage
   | WsErrorMessage
-  | WsPongMessage;
+  | WsPongMessage
+  | WsRepoListMessage;
 
 // Client → Server messages
 
@@ -85,6 +103,9 @@ export interface WsSessionCreateMessage {
   prompt: string;
   cwd?: string;
   title?: string;
+  repo_url?: string;
+  repo_id?: string;
+  branch?: string;
 }
 
 export interface WsSessionSendMessage {
@@ -108,9 +129,14 @@ export interface WsPingMessage {
   type: "ping";
 }
 
+export interface WsRepoListRequestMessage {
+  type: "repo.list";
+}
+
 export type WsClientMessage =
   | WsSessionCreateMessage
   | WsSessionSendMessage
   | WsSessionStopMessage
   | WsRefreshIndexMessage
-  | WsPingMessage;
+  | WsPingMessage
+  | WsRepoListRequestMessage;

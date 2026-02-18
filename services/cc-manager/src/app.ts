@@ -1,5 +1,6 @@
 import type { ClaudeServiceLike } from "./claude-service";
 import type { ManagerConfig } from "./config";
+import type { GitServiceLike } from "./git-service";
 import { jsonResponse } from "./http-utils";
 import type { ManagerRepository } from "./repository";
 import type { IndexerLike } from "./main";
@@ -9,17 +10,20 @@ export class App {
 	readonly claudeService: ClaudeServiceLike;
 	readonly config: ManagerConfig;
 	readonly indexer?: IndexerLike;
+	readonly gitService?: GitServiceLike;
 
 	constructor(deps: {
 		repository: ManagerRepository;
 		claudeService: ClaudeServiceLike;
 		config: ManagerConfig;
 		indexer?: IndexerLike;
+		gitService?: GitServiceLike;
 	}) {
 		this.repository = deps.repository;
 		this.claudeService = deps.claudeService;
 		this.config = deps.config;
 		this.indexer = deps.indexer;
+		this.gitService = deps.gitService;
 	}
 
 	listSessions(req: Request): Response {
@@ -40,6 +44,23 @@ export class App {
 				source: session.source,
 				message_count: session.messageCount,
 				total_cost_usd: session.totalCostUsd,
+				repo_id: session.repoId,
+				worktree_path: session.worktreePath,
+				branch: session.branch,
+			})),
+		});
+	}
+
+	listRepositories(_req: Request): Response {
+		const repos = this.repository.listRepositories();
+		return jsonResponse(200, {
+			repositories: repos.map((r) => ({
+				id: r.id,
+				url: r.url,
+				slug: r.slug,
+				default_branch: r.defaultBranch,
+				created_at: r.createdAt,
+				last_fetched_at: r.lastFetchedAt,
 			})),
 		});
 	}

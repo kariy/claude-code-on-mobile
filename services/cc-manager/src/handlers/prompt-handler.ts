@@ -38,6 +38,9 @@ export function createPromptHandler(app: App) {
 					cwd: params.cwd,
 					title: sessionTitle,
 					encodedCwd: params.encodedCwd,
+					repoId: params.repoId,
+					worktreePath: params.worktreePath,
+					branch: params.branch,
 				});
 
 				const eventType = params.resumeSessionId
@@ -123,6 +126,9 @@ export function createPromptHandler(app: App) {
 						lastActivityAt: nowMs(),
 						source: "db",
 						costToAdd: totalCostUsd,
+						repoId: params.repoId,
+						worktreePath: params.worktreePath,
+						branch: params.branch,
 					});
 					sessionMeta = toWsSessionMeta(freshMetadata);
 					app.repository.recordEvent({
